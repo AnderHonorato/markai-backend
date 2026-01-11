@@ -1,0 +1,7 @@
+{
+  "ignore": [
+    "auth_info_baileys/*",
+    "prisma/dev.db",
+    "prisma/dev.db-journal"
+  ]
+}

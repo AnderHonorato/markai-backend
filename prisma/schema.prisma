@@ -1,0 +1,107 @@
+// backend/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Model (Serve para Cliente e Profissional)
+model User {
+  id               String    @id @default(uuid())
+  email            String    @unique
+  password         String    
+  type             String    // "CLIENT" ou "PROFESSIONAL"
+  
+  // Dados Básicos
+  name             String?
+  phone            String?   // Importante para WhatsApp
+  
+  // Dados Profissionais
+  cpf              String?
+  companyName      String?
+  address          String?
+  description      String?
+  openHours        String?   // Texto de exibição (ex: "Seg a Sex")
+  
+  // --- NOVOS CAMPOS (Lógica de Tempo) ---
+  serviceDuration  Int       @default(60)       // Duração do serviço em minutos
+  workStart        String    @default("09:00")  // Horário de início
+  workEnd          String    @default("18:00")  // Horário de fim
+  // -----------------------------------------
+
+  // --- NOVO: Catálogo de Serviços (Relação) ---
+  services         Service[] 
+  // ---------------------------------------
+
+  // Configurações
+  notificationsEnabled Boolean @default(true) // Para desativar notificações se desejar
+  
+  // Sistema de Pontuação/Reputação
+  reputationScore  Float     @default(5.0) 
+  totalAppointments Int      @default(0)    // Total de agendamentos concluídos
+  noShowCount      Int       @default(0)    // Quantas vezes o cliente faltou
+
+  // Relacionamentos de Agendamento
+  appointmentsAsClient  Appointment[] @relation("ClientAppointments")
+  appointmentsAsPro     Appointment[] @relation("ProAppointments")
+  
+  // Relacionamentos de Chat (Novo)
+  sentMessages      ChatMessage[] @relation("Sender")
+  receivedMessages  ChatMessage[] @relation("Receiver")
+
+  createdAt DateTime @default(now())
+}
+
+// --- NOVA TABELA: SERVIÇOS ---
+model Service {
+  id      String @id @default(uuid())
+  name    String // ex: "Corte Degradê"
+  price   Float  // ex: 35.00
+  
+  proId   String
+  pro     User   @relation(fields: [proId], references: [id])
+}
+
+// Modelo de Agendamento
+model Appointment {
+  id              String    @id @default(uuid())
+  date            DateTime // Data e Hora do agendamento
+  
+  // Status possíveis: PENDING, CONFIRMED, CANCELED, COMPLETED, NOSHOW, RESCHEDULE_REQ
+  status          String    @default("PENDING") 
+  
+  // Quem agendou?
+  clientId        String
+  client          User      @relation("ClientAppointments", fields: [clientId], references: [id])
+  
+  // Com quem?
+  proId           String
+  professional    User      @relation("ProAppointments", fields: [proId], references: [id])
+
+  // Negociação de Reagendamento
+  rescheduleDate   DateTime?
+  rescheduleReason String?
+  rescheduleBy     String? // Quem pediu? "CLIENT" ou "PRO"
+
+  createdAt DateTime @default(now())
+}
+
+// Modelo de Chat (Novo)
+model ChatMessage {
+  id        String    @id @default(uuid())
+  content   String
+  read      Boolean   @default(false)
+  createdAt DateTime @default(now())
+
+  // Quem enviou
+  senderId  String
+  sender    User      @relation("Sender", fields: [senderId], references: [id])
+
+  // Quem recebeu
+  receiverId String
+  receiver   User      @relation("Receiver", fields: [receiverId], references: [id])
+}
