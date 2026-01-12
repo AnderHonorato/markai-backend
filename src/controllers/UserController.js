@@ -2,6 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const axios = require('axios');
 
+// Função de Geocodificação
 async function getCoordinates(data) {
   const headers = { 'User-Agent': 'MarkaiApp/1.0 (contato@markai.app)' };
   try {
@@ -17,36 +18,75 @@ async function getCoordinates(data) {
 }
 
 module.exports = {
+  // Criar Usuário
   async create(req, res) {
     try {
       const { name, email, password, type, phone, cpf, companyName, address, description, openHours } = req.body;
-      const userExists = await prisma.user.findUnique({ where: { email } });
+      
+      const userExists = await prisma.user.findUnique({ 
+        where: { email: email.toLowerCase() } 
+      });
+      
       if (userExists) return res.status(400).json({ error: 'Email já cadastrado' });
 
       const user = await prisma.user.create({
         data: { 
-          name, email, password, type, phone, cpf,
+          name, 
+          email: email.toLowerCase(), 
+          password, 
+          type, 
+          phone, 
+          cpf,
           companyName: companyName || null,
           address: address || null,
           description: description || "Profissional parceiro Markaí",
           openHours: openHours || "Horário Comercial",
-          serviceDuration: 60, workStart: "09:00", workEnd: "18:00", reputationScore: 5.0
+          serviceDuration: 60, 
+          workStart: "09:00", 
+          workEnd: "18:00", 
+          reputationScore: 5.0
         }
       });
+      
+      console.log(`✅ Usuário criado com sucesso: ${email}`);
       return res.json(user);
-    } catch (error) { return res.status(500).json({ error: 'Erro ao criar usuário' }); }
+    } catch (error) { 
+      console.error("Erro no cadastro:", error.message);
+      return res.status(500).json({ error: 'Erro ao criar usuário' }); 
+    }
   },
 
+  // Login do Usuário
   async login(req, res) {
     const { email, password } = req.body;
     try {
-      const user = await prisma.user.findUnique({ where: { email } });
-      if (!user || user.password !== password) return res.status(401).json({ error: 'Email ou senha incorretos' });
-      if (user.isBlocked) return res.status(403).json({ error: 'Sua conta está suspensa' });
-      return res.json({ user, token: 'token-ficticio-' + Math.random().toString(36).substr(2) });
-    } catch (error) { return res.status(500).json({ error: 'Erro no login' }); }
+      console.log(`Tentativa de login: ${email}`);
+      
+      const user = await prisma.user.findUnique({ 
+        where: { email: email.toLowerCase() } 
+      });
+
+      if (!user || user.password !== password) {
+        return res.status(401).json({ error: 'Email ou senha incorretos' });
+      }
+
+      if (user.isBlocked) {
+        return res.status(403).json({ error: 'Sua conta está suspensa' });
+      }
+
+      console.log(`✅ Login realizado: ${user.name}`);
+      
+      return res.json({ 
+        user, 
+        token: 'token-ficticio-' + Math.random().toString(36).substr(2) 
+      });
+    } catch (error) { 
+      console.error("Erro no login:", error.message);
+      return res.status(500).json({ error: 'Erro no login' }); 
+    }
   },
 
+  // Buscar Perfil por ID
   async getUser(req, res) {
     const { id } = req.params;
     try {
@@ -62,13 +102,18 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro ao buscar perfil' }); }
   },
 
+  // Listar Profissionais
   async listProfessionals(req, res) {
     try {
-      const pros = await prisma.user.findMany({ where: { type: 'PROFESSIONAL' }, orderBy: { reputationScore: 'desc' } });
+      const pros = await prisma.user.findMany({ 
+        where: { type: 'PROFESSIONAL' }, 
+        orderBy: { reputationScore: 'desc' } 
+      });
       return res.json(pros);
     } catch (error) { return res.status(500).json({ error: 'Erro ao buscar profissionais' }); }
   },
 
+  // Atualizar Configurações
   async updateConfig(req, res) {
     const { id } = req.params;
     const body = req.body;
@@ -84,11 +129,16 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro ao atualizar' }); }
   },
 
+  // Listar por Proximidade
   async listNearby(req, res) {
     const { lat, lng } = req.query;
     try {
-      const professionals = await prisma.user.findMany({ where: { type: 'PROFESSIONAL', latitude: { not: null }, longitude: { not: null } } });
+      const professionals = await prisma.user.findMany({ 
+        where: { type: 'PROFESSIONAL', latitude: { not: null }, longitude: { not: null } } 
+      });
+      
       if (!lat || !lng) return res.json(professionals);
+      
       const calculateDistance = (lat1, lon1, lat2, lon2) => {
         const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -96,12 +146,17 @@ module.exports = {
         const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
         return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
       };
-      const nearby = professionals.map(p => ({ ...p, distance: calculateDistance(parseFloat(lat), parseFloat(lng), p.latitude, p.longitude) })).sort((a, b) => a.distance - b.distance);
+
+      const nearby = professionals.map(p => ({ 
+        ...p, 
+        distance: calculateDistance(parseFloat(lat), parseFloat(lng), p.latitude, p.longitude) 
+      })).sort((a, b) => a.distance - b.distance);
+      
       return res.json(nearby);
     } catch (error) { return res.status(500).json({ error: 'Erro na busca' }); }
   },
 
-  // FUNÇÃO QUE FALTAVA
+  // Bloquear Usuário
   async toggleBlock(req, res) {
     const { id } = req.params;
     const { proId } = req.body;
@@ -115,7 +170,7 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro ao bloquear' }); }
   },
 
-  // FUNÇÃO QUE FALTAVA
+  // Buscar por Link Único (Slug)
   async getBySlug(req, res) {
     const { slug } = req.params;
     try {
