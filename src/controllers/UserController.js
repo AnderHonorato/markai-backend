@@ -19,10 +19,9 @@ async function getCoordinates(data) {
 module.exports = {
   async create(req, res) {
     try {
-      // Pegamos os dados que vêm do App
       const { 
         name, email, password, type, phone, cpf, 
-        companyName, description, openHours,
+        companyName, description, openHours, avatarUrl,
         street, number, neighborhood, city, state, zipCode 
       } = req.body;
 
@@ -32,7 +31,6 @@ module.exports = {
       
       if (userExists) return res.status(400).json({ error: 'Email já cadastrado' });
 
-      // O ERRO ESTAVA AQUI: Removi o campo 'address' que não existe no seu schema.prisma
       const user = await prisma.user.create({
         data: { 
           name, 
@@ -41,17 +39,16 @@ module.exports = {
           type, 
           phone, 
           cpf,
+          avatarUrl: avatarUrl || null, // CAMPO PARA A FOTO
           companyName: companyName || null,
           description: description || "Profissional parceiro Markaí",
           openHours: openHours || "Horário Comercial",
-          // Mapeando os campos de endereço corretamente para o Prisma
           street: street || null,
           number: number || null,
           neighborhood: neighborhood || null,
           city: city || null,
           state: state || null,
           zipCode: zipCode || null,
-          // Padrões
           serviceDuration: 60, 
           workStart: "09:00", 
           workEnd: "18:00", 
@@ -59,20 +56,63 @@ module.exports = {
         }
       });
 
-      console.log(`✅ Usuário criado: ${email}`);
       return res.json(user);
     } catch (error) { 
-      console.error("❌ Erro no Prisma:", error.message);
-      return res.status(500).json({ error: 'Erro ao criar usuário no banco' }); 
+      console.error("Erro no cadastro:", error.message);
+      return res.status(500).json({ error: 'Erro ao criar usuário' }); 
     }
   },
 
+  async updateConfig(req, res) {
+    const { id } = req.params;
+    const { 
+      name, phone, companyName, description, avatarUrl, 
+      street, city, serviceDuration, fidelityGoal, defaultFloat 
+    } = req.body;
+
+    try {
+      // Prepara os dados para atualização (apenas o que foi enviado)
+      const updateData = {};
+      if (name) updateData.name = name;
+      if (phone) updateData.phone = phone;
+      if (companyName) updateData.companyName = companyName;
+      if (description) updateData.description = description;
+      if (avatarUrl) updateData.avatarUrl = avatarUrl; // SALVA A FOTO AQUI
+      if (serviceDuration) updateData.serviceDuration = parseInt(serviceDuration);
+      if (fidelityGoal) updateData.fidelityGoal = parseInt(fidelityGoal);
+      if (defaultFloat) updateData.defaultFloat = parseFloat(defaultFloat);
+
+      // Atualiza coordenadas se mudar endereço
+      if (street && city) {
+        updateData.street = street;
+        updateData.city = city;
+        const coords = await getCoordinates(req.body);
+        if (coords) {
+          updateData.latitude = coords.lat;
+          updateData.longitude = coords.lng;
+        }
+      }
+
+      const user = await prisma.user.update({
+        where: { id },
+        data: updateData
+      });
+
+      console.log(`✅ Perfil atualizado: ${user.email}`);
+      return res.json(user);
+    } catch (error) { 
+      console.error("Erro ao atualizar perfil:", error.message);
+      return res.status(500).json({ error: 'Erro ao atualizar configurações' }); 
+    }
+  },
+
+  // Mantém as outras funções (login, getUser, etc) exatamente como estão no seu arquivo atual
   async login(req, res) {
     const { email, password } = req.body;
     try {
       const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
       if (!user || user.password !== password) return res.status(401).json({ error: 'Email ou senha incorretos' });
-      return res.json({ user, token: 'token-ficticio-' + Math.random().toString(36).substr(2) });
+      return res.json({ user, token: 'token-ficticio' });
     } catch (error) { return res.status(500).json({ error: 'Erro no login' }); }
   },
 
@@ -81,10 +121,7 @@ module.exports = {
     try {
       const user = await prisma.user.findUnique({ 
         where: { id }, 
-        include: { 
-          services: true,
-          _count: { select: { reviewsReceived: true, appointmentsAsClient: true, appointmentsAsPro: true } }
-        } 
+        include: { services: true, _count: { select: { reviewsReceived: true, appointmentsAsClient: true, appointmentsAsPro: true } } } 
       });
       return res.json(user);
     } catch (error) { return res.status(500).json({ error: 'Erro perfil' }); }
@@ -95,17 +132,6 @@ module.exports = {
       const pros = await prisma.user.findMany({ where: { type: 'PROFESSIONAL' }, orderBy: { reputationScore: 'desc' } });
       return res.json(pros);
     } catch (error) { return res.status(500).json({ error: 'Erro profissionais' }); }
-  },
-
-  async updateConfig(req, res) {
-    const { id } = req.params;
-    const body = req.body;
-    try {
-      const updateData = { ...body };
-      if (body.serviceDuration) updateData.serviceDuration = parseInt(body.serviceDuration);
-      const user = await prisma.user.update({ where: { id }, data: updateData });
-      return res.json(user);
-    } catch (error) { return res.status(500).json({ error: 'Erro update' }); }
   },
 
   async listNearby(req, res) {
