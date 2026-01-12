@@ -8,7 +8,6 @@ const ReviewController = require('./controllers/ReviewController');
 const CashController = require('./controllers/CashController');
 const NoteController = require('./controllers/NoteController');
 
-// MIDDLEWARE DE DEBUG
 routes.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.path}`);
   next();
@@ -34,15 +33,12 @@ routes.get('/appointments', AppointmentController.list);
 routes.patch('/appointments/:id/confirm', AppointmentController.confirm); 
 routes.post('/appointments/:id/cancel', AppointmentController.cancel);
 routes.post('/appointments/:id/finish', AppointmentController.finish);
-
-// REAGENDAMENTO (Novas rotas adicionadas anteriormente)
 routes.post('/appointments/:id/propose', AppointmentController.propose);
 routes.post('/appointments/:id/respond', AppointmentController.respond);
 
-// --- AVALIAÇÕES (ESTAVA FALTANDO ISSO) ---
+// AVALIAÇÕES
 routes.post('/reviews', ReviewController.create);
 routes.get('/reviews/:userId', ReviewController.list);
-// ------------------------------------------
 
 // CHAT E IA
 routes.post('/ai/chat', ChatController.aiChat);
@@ -59,9 +55,8 @@ routes.post('/cash/reopen', CashController.reopen);
 routes.post('/notes', NoteController.saveNote);
 routes.get('/notes', NoteController.getNote);
 
-// SLUG (SEMPRE POR ÚLTIMO)
+// SLUG
 routes.get('/:slug', UserController.getBySlug); 
 
 console.log('✅ Rotas carregadas com sucesso');
-
 module.exports = routes;
