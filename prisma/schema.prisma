@@ -9,99 +9,179 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User Model (Serve para Cliente e Profissional)
 model User {
-  id               String    @id @default(uuid())
-  email            String    @unique
-  password         String    
-  type             String    // "CLIENT" ou "PROFESSIONAL"
-  
-  // Dados Básicos
+  id               String   @id @default(uuid())
+  email            String   @unique
+  password         String   
+  type             String   // "CLIENT" ou "PROFESSIONAL"
+  notificationsEnabled Boolean @default(true)
+  isBlocked        Boolean  @default(false)
+  blockedBy        String?  // ID do profissional que bloqueou
+  pushToken        String?  // Armazena o Expo Push Token
+  slug             String?  @unique // Link único: markai.app/slug
+  fidelityEnabled  Boolean  @default(false)
+  fidelityGoal     Int      @default(10) 
+  fidelityBonus    String?  
+
+  // Dados Pessoais
   name             String?
-  phone            String?   // Importante para WhatsApp
-  
+  phone            String?    
+  avatarUrl        String?   // Foto do perfil (Base64)
+
+  // Segurança
+  isVerified       Boolean   @default(false)
+  verificationCode String?   
+
   // Dados Profissionais
   cpf              String?
   companyName      String?
-  address          String?
   description      String?
-  openHours        String?   // Texto de exibição (ex: "Seg a Sex")
-  
-  // --- NOVOS CAMPOS (Lógica de Tempo) ---
-  serviceDuration  Int       @default(60)       // Duração do serviço em minutos
-  workStart        String    @default("09:00")  // Horário de início
-  workEnd          String    @default("18:00")  // Horário de fim
-  // -----------------------------------------
+  openHours        String?    
 
-  // --- NOVO: Catálogo de Serviços (Relação) ---
-  services         Service[] 
-  // ---------------------------------------
+  // --- ENDEREÇO ESTRUTURADO ---
+  zipCode          String?    
+  street           String?    
+  number           String?    
+  neighborhood     String?    
+  city             String?    
+  state            String?    
+  country          String?    @default("Brasil")
+  complement       String?    
+   
+  // Geolocalização para buscas
+  latitude         Float?
+  longitude        Float?
+    
+  // Configurações Profissional
+  serviceDuration  Int       @default(60)          
+  workStart        String    @default("09:00")    
+  workEnd          String    @default("18:00")    
 
-  // Configurações
-  notificationsEnabled Boolean @default(true) // Para desativar notificações se desejar
-  
-  // Sistema de Pontuação/Reputação
-  reputationScore  Float     @default(5.0) 
-  totalAppointments Int      @default(0)    // Total de agendamentos concluídos
-  noShowCount      Int       @default(0)    // Quantas vezes o cliente faltou
+  // Financeiro
+  autoOpenRegister  Boolean   @default(false)
+  autoCloseRegister Boolean   @default(false)
+  defaultFloat      Float     @default(0.0)
 
-  // Relacionamentos de Agendamento
+  // Métricas
+  reputationScore   Float    @default(5.0) 
+  totalReviews      Int      @default(0)      
+  totalAppointments Int      @default(0)      
+  noShowCount       Int      @default(0)      
+
+  // Relacionamentos
+  services              Service[] 
   appointmentsAsClient  Appointment[] @relation("ClientAppointments")
   appointmentsAsPro     Appointment[] @relation("ProAppointments")
+  reviewsReceived       Review[]      @relation("ReviewReceiver")
+  reviewsGiven          Review[]      @relation("ReviewAuthor")
+  cashRegisters         CashRegister[]
+  messagesSent          ChatMessage[] @relation("SentMessages")
+  messagesReceived      ChatMessage[] @relation("ReceivedMessages")
   
-  // Relacionamentos de Chat (Novo)
-  sentMessages      ChatMessage[] @relation("Sender")
-  receivedMessages  ChatMessage[] @relation("Receiver")
-
+  // --- NOVOS RELACIONAMENTOS PARA NOTAS ---
+  notesWritten          ClientNote[] @relation("NotesWritten")
+  notesAboutMe          ClientNote[] @relation("NotesReceived")
+    
   createdAt DateTime @default(now())
 }
 
-// --- NOVA TABELA: SERVIÇOS ---
 model Service {
-  id      String @id @default(uuid())
-  name    String // ex: "Corte Degradê"
-  price   Float  // ex: 35.00
-  
-  proId   String
-  pro     User   @relation(fields: [proId], references: [id])
+  id          String @id @default(uuid())
+  name        String 
+  price       Float  
+  category    String  @default("Geral")
+  imageUrl    String? 
+  description String? 
+
+  proId    String
+  pro      User   @relation(fields: [proId], references: [id])
 }
 
-// Modelo de Agendamento
 model Appointment {
-  id              String    @id @default(uuid())
-  date            DateTime // Data e Hora do agendamento
+  id             String   @id @default(uuid())
+  date           DateTime 
+  status         String   @default("PENDING") 
+  serviceList    String?   
+  totalPrice     Float    @default(0.0)
+  clientConfirmed Boolean   @default(false) 
+  proConfirmed    Boolean   @default(false) 
   
-  // Status possíveis: PENDING, CONFIRMED, CANCELED, COMPLETED, NOSHOW, RESCHEDULE_REQ
-  status          String    @default("PENDING") 
-  
-  // Quem agendou?
-  clientId        String
-  client          User      @relation("ClientAppointments", fields: [clientId], references: [id])
-  
-  // Com quem?
-  proId           String
-  professional    User      @relation("ProAppointments", fields: [proId], references: [id])
+  clientId       String
+  client         User     @relation("ClientAppointments", fields: [clientId], references: [id])
+  proId          String
+  professional   User     @relation("ProAppointments", fields: [proId], references: [id])
 
-  // Negociação de Reagendamento
   rescheduleDate   DateTime?
   rescheduleReason String?
-  rescheduleBy     String? // Quem pediu? "CLIENT" ou "PRO"
+  rescheduleBy     String? 
+
+  cancelReason     String?    
+  cancelledBy      String?    
+  
+  isFinishedEarly  Boolean  @default(false)
+
+  // MUDANÇA AQUI: "reviews" no plural e array []
+  reviews          Review[] 
 
   createdAt DateTime @default(now())
 }
 
-// Modelo de Chat (Novo)
+model Review {
+  id            String      @id @default(uuid())
+  rating        Int         
+  comment       String?
+  
+  // MUDANÇA AQUI: Removemos o @unique do appointmentId
+  appointmentId String      
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  
+  authorId      String
+  author        User        @relation("ReviewAuthor", fields: [authorId], references: [id])
+  receiverId    String
+  receiver      User        @relation("ReviewReceiver", fields: [receiverId], references: [id])
+  
+  createdAt     DateTime    @default(now())
+
+  // MUDANÇA AQUI: Garante que um autor só avalie o mesmo agendamento 1 vez
+  @@unique([appointmentId, authorId]) 
+}
+
+model CashRegister {
+  id            String   @id @default(uuid())
+  date          DateTime @default(now()) 
+  status        String   @default("OPEN") 
+  initialValue  Float    @default(0.0)    
+  totalIncome   Float    @default(0.0)    
+  finalValue    Float    @default(0.0)    
+  openedAt      DateTime @default(now())
+  closedAt      DateTime?
+  proId         String
+  professional  User     @relation(fields: [proId], references: [id])
+}
+
 model ChatMessage {
-  id        String    @id @default(uuid())
-  content   String
-  read      Boolean   @default(false)
-  createdAt DateTime @default(now())
-
-  // Quem enviou
-  senderId  String
-  sender    User      @relation("Sender", fields: [senderId], references: [id])
-
-  // Quem recebeu
+  id         String   @id @default(uuid())
+  content    String
+  createdAt  DateTime @default(now())
+  senderId   String
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
   receiverId String
-  receiver   User      @relation("Receiver", fields: [receiverId], references: [id])
+  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+}
+
+// --- NOVO MODEL: NOTAS PRIVADAS ---
+model ClientNote {
+  id        String   @id @default(uuid())
+  content   String   
+  
+  proId     String   
+  clientId  String   
+  
+  professional User @relation("NotesWritten", fields: [proId], references: [id])
+  client       User @relation("NotesReceived", fields: [clientId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([proId, clientId]) // Só uma nota por cliente/pro
 }

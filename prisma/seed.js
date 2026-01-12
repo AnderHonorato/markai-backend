@@ -2,48 +2,100 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  // 1. Cria um Profissional (se não existir)
-  const pro = await prisma.user.upsert({
-    where: { email: 'barbeiro@teste.com' },
+  console.log('🌱 Iniciando Seed - Zona Norte SP...');
+
+  // 1. Barbeiro no Jaçanã
+  const pro1 = await prisma.user.upsert({
+    where: { email: 'jacana@barba.com' },
     update: {},
     create: {
-      email: 'barbeiro@teste.com',
-      password: '123',
+      name: 'Ricardo Silva',
+      email: 'jacana@barba.com',
+      password: 'senha123',
       type: 'PROFESSIONAL',
-      name: 'João Barbeiro',
-      companyName: 'Barbearia do João',
-    },
+      phone: '11988887777',
+      companyName: 'Barbearia do Jaçanã',
+      description: 'Corte clássico e barba com toalha quente no coração do Jaçanã.',
+      street: 'Avenida Guapira',
+      number: '2000',
+      neighborhood: 'Jaçanã',
+      city: 'São Paulo',
+      state: 'SP',
+      latitude: -23.4578,
+      longitude: -46.5862,
+      services: {
+        create: [
+          { name: 'Corte de Cabelo', price: 45.0, category: 'Cabelo' },
+          { name: 'Barba Completa', price: 35.0, category: 'Barba' }
+        ]
+      }
+    }
   });
 
-  // 2. Cria um Cliente
-  const client = await prisma.user.upsert({
-    where: { email: 'cliente@teste.com' },
+  // 2. Manicure no Parque Edu Chaves
+  const pro2 = await prisma.user.upsert({
+    where: { email: 'edu@unhas.com' },
     update: {},
     create: {
-      email: 'cliente@teste.com',
-      password: '123',
-      type: 'CLIENT',
-      name: 'Maria Cliente',
-      phone: '11999998888',
-    },
+      name: 'Camila Unhas',
+      email: 'edu@unhas.com',
+      password: 'senha123',
+      type: 'PROFESSIONAL',
+      phone: '11977776666',
+      companyName: 'Studio Edu Chaves Nails',
+      description: 'Especialista em unhas de fibra e esmaltação em gel.',
+      street: 'Avenida Edu Chaves',
+      number: '500',
+      neighborhood: 'Parque Edu Chaves',
+      city: 'São Paulo',
+      state: 'SP',
+      latitude: -23.4755,
+      longitude: -46.5910,
+      services: {
+        create: [
+          { name: 'Pé e Mão', price: 60.0, category: 'Geral' },
+          { name: 'Alongamento Fibra', price: 150.0, category: 'Especial' }
+        ]
+      }
+    }
   });
 
-  // 3. Cria um Agendamento para HOJE às 15:00
-  const hoje = new Date();
-  hoje.setHours(15, 0, 0, 0);
-
-  await prisma.appointment.create({
-    data: {
-      clientId: client.id,
-      proId: pro.id,
-      date: hoje,
-      status: 'PENDING',
-    },
+  // 3. Esteticista no Tucuruvi
+  const pro3 = await prisma.user.upsert({
+    where: { email: 'tucuruvi@estetica.com' },
+    update: {},
+    create: {
+      name: 'Dra. Beatriz',
+      email: 'tucuruvi@estetica.com',
+      password: 'senha123',
+      type: 'PROFESSIONAL',
+      phone: '11966665555',
+      companyName: 'Tucuruvi Estética & Bem Estar',
+      description: 'Limpeza de pele e massagem relaxante ao lado do metrô.',
+      street: 'Avenida Tucuruvi',
+      number: '800',
+      neighborhood: 'Tucuruvi',
+      city: 'São Paulo',
+      state: 'SP',
+      latitude: -23.4801,
+      longitude: -46.6038,
+      services: {
+        create: [
+          { name: 'Limpeza de Pele', price: 120.0, category: 'Rosto' },
+          { name: 'Drenagem Linfática', price: 90.0, category: 'Corpo' }
+        ]
+      }
+    }
   });
 
-  console.log('Banco de dados populado com sucesso! 🌱');
+  console.log('✅ Seed finalizado com sucesso!');
 }
 
 main()
-  .catch((e) => console.error(e))
-  .finally(async () => await prisma.$disconnect());
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
