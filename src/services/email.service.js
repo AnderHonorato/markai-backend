@@ -9,8 +9,8 @@ async function enviarEmailVerificacao(destino, codigo) {
   console.log(`📧 [EMAIL] Iniciando envio via Resend para: ${destino}`);
   
   try {
-    const data = await resend.emails.send({
-      from: 'Markaí <onboarding@resend.dev>',
+    const { data, error } = await resend.emails.send({
+      from: 'Markaí <noreply@markai.app>', // Seu domínio próprio!
       to: destino,
       subject: '🔐 Seu código de verificação Markaí',
       html: `
@@ -60,8 +60,16 @@ async function enviarEmailVerificacao(destino, codigo) {
       `,
     });
 
+    if (error) {
+      console.error("❌ [EMAIL] Erro Resend:", error);
+      throw new Error(error.message);
+    }
+
     console.log("✅ [EMAIL] Email enviado com sucesso via Resend!");
-    console.log("   ID:", data.data?.id);
+    console.log("   📧 Para:", destino);
+    console.log("   🆔 ID:", data?.id);
+    console.log("   ⚠️  IMPORTANTE: Verifique a pasta SPAM/LIXO ELETRÔNICO");
+    console.log("   🔗 Dashboard: https://resend.com/emails");
     return true;
 
   } catch (error) {
