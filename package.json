@@ -24,6 +24,7 @@
     "pino": "^10.1.1",
     "qrcode-terminal": "^0.12.0",
     "qs": "^6.14.1",
+    "resend": "^6.7.0",
     "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js"
   },
   "devDependencies": {
