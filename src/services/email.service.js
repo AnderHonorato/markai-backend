@@ -10,7 +10,7 @@ async function enviarEmailVerificacao(destino, codigo) {
   
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Markaí <noreply@markai.app>', // Seu domínio próprio!
+      from: 'Markaí <onboarding@resend.dev>', // Domínio de teste (funciona imediatamente)
       to: destino,
       subject: '🔐 Seu código de verificação Markaí',
       html: `
