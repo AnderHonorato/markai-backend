@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "e5af0fed-67d6-4fbb-a9b1-76e719494d29"
+      }
+    },
+    "android": {
+      "package": "com.markai.app"
+    }
+  }
+}

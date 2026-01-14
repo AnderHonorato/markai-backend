@@ -1,7 +1,6 @@
 {
-  "ignore": [
-    "auth_info_baileys/*",
-    "prisma/dev.db",
-    "prisma/dev.db-journal"
-  ]
+  "ignore": ["auth_sessions/*", "*.log"],
+  "env": {
+    "NODE_ENV": "development"
+  }
 }

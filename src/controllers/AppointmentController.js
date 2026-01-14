@@ -1,52 +1,56 @@
+// backend/src/controllers/AppointmentController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { sendPushNotification } = require('../services/notificationService');
 const { enviarMensagem } = require('../bot'); 
+const { addMinutes, parseISO, isBefore, format } = require('date-fns');
+
+// --- NOVA FORMATAÇÃO DE ID (MARKAI-00000-00001) ---
+const formatDisplayId = (seqId) => {
+    return `MARKAI-${String(seqId).padStart(10, '0').replace(/(\d{5})(\d{5})/, '$1-$2')}`;
+};
 
 module.exports = {
   // 1. Criar Agendamento
   async create(req, res) {
     const { clientId, proId, date, serviceList, totalPrice } = req.body;
+
+    const appointmentDate = parseISO(date);
+    if (isBefore(appointmentDate, new Date())) {
+        return res.status(400).json({ error: 'Não é possível agendar em datas passadas.' });
+    }
+
     try {
       const pro = await prisma.user.findUnique({ where: { id: proId } });
       const client = await prisma.user.findUnique({ where: { id: clientId } });
       
+      if (!pro || !client) return res.status(404).json({ error: 'Usuário não encontrado' });
+
       const duration = pro.serviceDuration || 60;
-      const newStart = new Date(date);
-      const newEnd = new Date(newStart.getTime() + duration * 60000); 
+      const endDate = addMinutes(appointmentDate, duration);
 
-      // 1. Evita duplicidade exata (Anti-Spam)
-      const exactDuplicate = await prisma.appointment.findFirst({
-          where: { 
-            clientId, 
-            proId, 
-            date: newStart, 
-            status: { notIn: ['CANCELED', 'CANCELLED', 'NO_SHOW'] } 
-          }
-      });
-      if (exactDuplicate) return res.status(400).json({ error: 'Você já tem um agendamento neste horário.' });
-
-      // 2. Verifica conflito de horário
       const conflicts = await prisma.appointment.findMany({
           where: { 
             proId, 
-            status: { notIn: ['CANCELED', 'NO_SHOW', 'CANCELLED'] },
-            date: { gte: new Date(newStart.getTime() - duration * 60000), lte: newEnd } 
+            status: { notIn: ['CANCELED', 'CANCELLED', 'NO_SHOW', 'COMPLETED'] }
           }
       });
 
-      if (conflicts.some(appt => {
+      const hasConflict = conflicts.some(appt => {
           const s = new Date(appt.date); 
-          const e = new Date(s.getTime() + duration * 60000);
-          return (newStart < e && newEnd > s);
-      })) return res.status(400).json({ error: 'Horário indisponível.' });
+          const e = addMinutes(s, duration);
+          return (appointmentDate < e && endDate > s);
+      });
 
-      // 3. Cria o agendamento
+      if (hasConflict) {
+          return res.status(400).json({ error: 'Este horário já está ocupado.' });
+      }
+
       const appointment = await prisma.appointment.create({ 
         data: { 
           clientId, 
           proId, 
-          date: newStart, 
+          date: appointmentDate, 
           status: 'PENDING',
           serviceList: serviceList || 'Serviço', 
           totalPrice: parseFloat(totalPrice) || 0,
@@ -59,7 +63,12 @@ module.exports = {
         await sendPushNotification(pro.pushToken, "Novo Agendamento! 📅", `${client.name} solicitou: ${serviceList}`);
       }
 
-      return res.json(appointment);
+      const result = {
+          ...appointment,
+          displayId: formatDisplayId(appointment.seqId)
+      };
+
+      return res.json(result);
     } catch (error) { 
       console.log(error);
       return res.status(500).json({ error: 'Erro ao agendar' }); 
@@ -68,35 +77,69 @@ module.exports = {
 
   // 2. Listar Agendamentos
   async list(req, res) {
-    const { userId, type } = req.query;
-    const where = type === 'PROFESSIONAL' ? { proId: userId } : { clientId: userId };
+    const { userId, type, search } = req.query; 
+    
     try {
+      let where = {};
+      if (type === 'PROFESSIONAL') {
+        where.proId = userId;
+      } else {
+        where.clientId = userId;
+      }
+
+      if (search) {
+          const cleanSearch = search.replace(/\D/g, ''); 
+          if (cleanSearch.length > 0) {
+             const seqId = parseInt(cleanSearch);
+             where.OR = [
+                 { seqId: seqId },
+                 type === 'PROFESSIONAL' 
+                   ? { client: { name: { contains: search, mode: 'insensitive' } } }
+                   : { professional: { companyName: { contains: search, mode: 'insensitive' } } }
+             ];
+          } else {
+             if (type === 'PROFESSIONAL') {
+                 where.client = { name: { contains: search, mode: 'insensitive' } };
+             } else {
+                 where.professional = { companyName: { contains: search, mode: 'insensitive' } };
+             }
+          }
+      }
+
       let appointments = await prisma.appointment.findMany({ 
         where, 
         include: { 
             client: true, 
             professional: true, 
-            reviews: true // <--- IMPORTANTE: Plural (reviews) para suportar múltiplas avaliações
+            reviews: true 
         }, 
-        orderBy: { date: 'asc' } 
+        orderBy: { date: 'desc' }
       });
 
-      // Atualiza status antigos para 'Aguardando Feedback' se já passaram
       const now = new Date();
       for (let app of appointments) {
         const appDate = new Date(app.date);
         const duration = app.professional?.serviceDuration || 60;
         
-        if (now > new Date(appDate.getTime() + duration * 60000) && app.status === 'CONFIRMED') {
+        if (now > addMinutes(appDate, duration) && app.status === 'CONFIRMED') {
            await prisma.appointment.update({ where: { id: app.id }, data: { status: 'AWAITING_FEEDBACK' } });
            app.status = 'AWAITING_FEEDBACK';
         }
       }
-      return res.json(appointments);
-    } catch (error) { return res.status(500).json({ error: 'Erro ao buscar' }); }
+
+      const formattedApps = appointments.map(app => ({
+          ...app,
+          displayId: formatDisplayId(app.seqId)
+      }));
+
+      return res.json(formattedApps);
+    } catch (error) { 
+        console.log(error);
+        return res.status(500).json({ error: 'Erro ao buscar' }); 
+    }
   },
 
-  // 3. Confirmar Agendamento
+  // 3. Confirmar
   async confirm(req, res) {
     const { id } = req.params;
     try {
@@ -106,13 +149,11 @@ module.exports = {
         include: { client: true, professional: true }
       });
 
-      // Tenta enviar WhatsApp
       try {
-        const dataFormatada = new Date(appt.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        const dataFormatada = format(new Date(appt.date), "HH:mm");
         await enviarMensagem(appt.client.phone, `✅ *Confirmado!*\nOlá ${appt.client.name}, seu horário na *${appt.professional.companyName || appt.professional.name}* às *${dataFormatada}* foi aceito.`);
-      } catch (e) {}
+      } catch (e) { console.log("Erro ao enviar whats:", e); }
 
-      // Tenta enviar Push
       if (appt.client.pushToken) {
           await sendPushNotification(appt.client.pushToken, "Confirmado! ✅", "O profissional aceitou seu agendamento.");
       }
@@ -121,16 +162,46 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro ao confirmar' }); }
   },
 
-  // 4. Propor Novo Horário (Reagendamento)
+  // 4. Propor Novo Horário
   async propose(req, res) {
     const { id } = req.params;
     const { newDate, reason, byWho } = req.body;
+    
+    const dateObj = parseISO(newDate);
+    if (isBefore(dateObj, new Date())) {
+        return res.status(400).json({ error: 'Não é possível reagendar para o passado.' });
+    }
+
     try {
+      const currentAppt = await prisma.appointment.findUnique({ where: { id } });
+      const pro = await prisma.user.findUnique({ where: { id: currentAppt.proId } });
+      
+      const duration = pro.serviceDuration || 60;
+      const endDate = addMinutes(dateObj, duration);
+
+      const allApps = await prisma.appointment.findMany({
+          where: {
+              proId: currentAppt.proId,
+              id: { not: id },
+              status: { notIn: ['CANCELED', 'CANCELLED', 'NO_SHOW', 'COMPLETED'] }
+          }
+      });
+
+      const hasConflict = allApps.some(appt => {
+          const start = new Date(appt.date);
+          const end = addMinutes(start, duration);
+          return (dateObj < end && endDate > start);
+      });
+
+      if (hasConflict) {
+          return res.status(400).json({ error: 'Horário indisponível para troca.' });
+      }
+
       const appt = await prisma.appointment.update({
         where: { id },
         data: {
           status: 'RESCHEDULE_REQ',
-          rescheduleDate: new Date(newDate),
+          rescheduleDate: dateObj,
           rescheduleReason: reason,
           rescheduleBy: byWho 
         },
@@ -146,24 +217,31 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro ao propor horário' }); }
   },
 
-  // 5. Responder Proposta
+  // 5. Responder Proposta (COM REGISTRO DE HISTÓRICO)
   async respond(req, res) {
     const { id } = req.params;
     const { accept } = req.body;
     try {
       const current = await prisma.appointment.findUnique({ where: { id } });
       
+      // Cria a mensagem de histórico para salvar no banco
+      const historyLog = accept ? "Negociação Aceita" : "Negociação Recusada";
+
       let data = {};
       if (accept) {
         data = {
-          date: current.rescheduleDate,
+          date: current.rescheduleDate, // Atualiza a data oficial
           status: 'CONFIRMED',
-          rescheduleDate: null, rescheduleBy: null, rescheduleReason: null
+          rescheduleDate: null, 
+          rescheduleBy: null,
+          rescheduleReason: historyLog // Salva o histórico aqui em vez de null
         };
       } else {
         data = {
           status: 'CONFIRMED', 
-          rescheduleDate: null, rescheduleBy: null, rescheduleReason: null
+          rescheduleDate: null, 
+          rescheduleBy: null,
+          rescheduleReason: historyLog // Salva o histórico
         };
       }
 
@@ -174,7 +252,7 @@ module.exports = {
       });
 
       const proposer = current.rescheduleBy === 'PRO' ? appt.professional : appt.client;
-      if (proposer.pushToken) {
+      if (proposer && proposer.pushToken) {
          const txt = accept ? "Proposta Aceita! ✅" : "Proposta Recusada ❌";
          await sendPushNotification(proposer.pushToken, txt, "A outra parte respondeu sua sugestão.");
       }
@@ -183,10 +261,10 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro ao responder' }); }
   },
 
-  // 6. Finalizar Manualmente
+  // 6. Finalizar
   async finish(req, res) {
     const { id } = req.params;
-    const { attended, isEarly } = req.body; // Recebe flag de antecipado
+    const { attended, isEarly } = req.body; 
     try {
       const status = attended ? 'COMPLETED' : 'NO_SHOW';
       
@@ -202,7 +280,6 @@ module.exports = {
       if (attended) {
           await prisma.user.update({ where: { id: appointment.clientId }, data: { totalAppointments: { increment: 1 } } });
           
-          // Notificação diferenciada
           if (appointment.client.pushToken) {
               const title = isEarly ? "Atendido Antecipadamente ✅" : "Serviço Concluído ✅";
               const body = isEarly ? "Seu atendimento foi finalizado antes do horário previsto." : "Obrigado pela preferência!";
@@ -216,7 +293,7 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro ao finalizar' }); }
   },
 
-  // 7. Cancelar Agendamento
+  // 7. Cancelar
   async cancel(req, res) {
     const { id } = req.params;
     const { reason, byWho } = req.body;
@@ -241,7 +318,7 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro cancelar' }); }
   },
 
-  // 8. Atualizar Status Genérico
+  // 8. Atualizar Status
   async updateStatus(req, res) {
     const { id } = req.params;
     const { status } = req.body;
@@ -253,7 +330,7 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro status' }); }
   },
 
-  // 9. Check-in por QR Code
+  // 9. Check-in
   async qrCheckIn(req, res) {
     const { clientId, proId } = req.body;
     try {

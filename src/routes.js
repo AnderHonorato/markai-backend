@@ -7,6 +7,11 @@ const ChatController = require('./controllers/ChatController');
 const ReviewController = require('./controllers/ReviewController'); 
 const CashController = require('./controllers/CashController');
 const NoteController = require('./controllers/NoteController');
+const AIController = require('./controllers/AIController');
+// --- ADICIONE ESTA LINHA ABAIXO ---
+const WhatsappController = require('./controllers/WhatsappController');
+routes.post('/whatsapp/disconnect', WhatsappController.disconnect); // Nova
+routes.get('/whatsapp/status/:userId', WhatsappController.getStatus); // Nova
 
 routes.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.path}`);
@@ -21,6 +26,11 @@ routes.get('/users/nearby', UserController.listNearby);
 routes.patch('/users/:id/config', UserController.updateConfig);
 routes.patch('/users/:id/block', UserController.toggleBlock);
 routes.get('/users/:id', UserController.getUser); 
+
+// SEGURANÇA
+routes.post('/users/register-intent', UserController.registerIntent);
+routes.post('/users/verify-registration', UserController.verifyRegistration);
+routes.post('/users/forgot-password', UserController.forgotPassword);
 
 // SERVIÇOS
 routes.post('/services', ServiceController.create);
@@ -40,10 +50,11 @@ routes.post('/appointments/:id/respond', AppointmentController.respond);
 routes.post('/reviews', ReviewController.create);
 routes.get('/reviews/:userId', ReviewController.list);
 
-// CHAT E IA
-routes.post('/ai/chat', ChatController.aiChat);
+// CHAT
 routes.get('/messages/:userId/:otherId', ChatController.listMessages);
 routes.post('/messages', ChatController.sendMessage);
+routes.post('/ai/chat', AIController.chat);
+routes.post('/whatsapp/connect', WhatsappController.connect);
 
 // FINANCEIRO
 routes.get('/cash/:userId', CashController.getStatus);
@@ -51,12 +62,30 @@ routes.post('/cash/open', CashController.open);
 routes.post('/cash/close', CashController.close);
 routes.post('/cash/reopen', CashController.reopen);
 
-// NOTAS PRIVADAS
+// NOTAS
 routes.post('/notes', NoteController.saveNote);
 routes.get('/notes', NoteController.getNote);
 
 // SLUG
 routes.get('/:slug', UserController.getBySlug); 
 
+// --- ROTAS ADMINISTRATIVAS ---
+routes.get('/admin/users', UserController.adminListUsers);
+routes.patch('/admin/users/:id/verify', UserController.adminToggleVerify);
+routes.post('/admin/users/:id/ban', UserController.adminBanUser);
+routes.patch('/admin/users/:id/mod', UserController.adminToggleMod);
+routes.delete('/admin/users/:id', UserController.adminDeleteUser);
+
+// --- ROTAS DE DENÚNCIA ---
+routes.post('/reports', UserController.createReport);
+routes.get('/admin/reports', UserController.listReports);
+routes.patch('/admin/reports/:id', UserController.resolveReport);
+routes.delete('/admin/reports/:id', UserController.deleteReport);
+routes.post('/admin/users/:id/warn', UserController.adminWarnUser);
+routes.post('/users/:id/warnings/dismiss', UserController.dismissWarning);
+routes.post('/users/:id/feedback/dismiss', UserController.dismissFeedback);
+routes.get('/admin/stats', UserController.adminGetStats);
+
 console.log('✅ Rotas carregadas com sucesso');
+
 module.exports = routes;

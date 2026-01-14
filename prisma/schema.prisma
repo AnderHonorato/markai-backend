@@ -10,128 +10,188 @@ datasource db {
 }
 
 model User {
-  id               String   @id @default(uuid())
-  email            String   @unique
-  password         String   
-  type             String   // "CLIENT" ou "PROFESSIONAL"
-  notificationsEnabled Boolean @default(true)
-  isBlocked        Boolean  @default(false)
-  blockedBy        String?  // ID do profissional que bloqueou
-  pushToken        String?  // Armazena o Expo Push Token
-  slug             String?  @unique // Link único: markai.app/slug
-  fidelityEnabled  Boolean  @default(false)
-  fidelityGoal     Int      @default(10) 
-  fidelityBonus    String?  
+  id                  String   @id @default(uuid())
+  email               String   @unique
+  password            String   
+  type                String   // "CLIENT" ou "PROFESSIONAL"
+  notificationsEnabled Boolean  @default(true)
+  isBlocked           Boolean  @default(false)
+  blockedBy           String?  // ID do profissional que bloqueou
+  pushToken           String?  // Armazena o Expo Push Token
+  slug                String?  @unique // Link único: markai.app/slug
+  fidelityEnabled     Boolean  @default(false)
+  fidelityGoal        Int      @default(10) 
+  fidelityBonus       String?  
 
   // Dados Pessoais
-  name             String?
-  phone            String?    
-  avatarUrl        String?   // Foto do perfil (Base64)
+  name                String?
+  phone               String?     
+  avatarUrl           String?   // Foto do perfil (Base64)
 
-  // Segurança
-  isVerified       Boolean   @default(false)
-  verificationCode String?   
+  // ADMINISTRATIVO
+  role                String    @default("USER")   // "USER", "MODERATOR", "OWNER"
+  banExpiresAt        DateTime? // Se a data for futura, o usuário está banido
+  banReason           String?   // Motivo do banimento (Exibido ao usuário)
+  activeWarning       String?   // Aviso ruim (Punição)
+  activeFeedback      String?   // Aviso bom (Agradecimento por denúncia)
 
-  // Dados Profissionais
-  cpf              String?
-  companyName      String?
-  description      String?
-  openHours        String?    
+  // Configurações de Notificação (Novo)
+  notificationSettings String? @default("60") // Minutos antes para avisar (ex: "60")
+
+  // --- SEGURANÇA E VERIFICAÇÃO ROBUSTA ---
+  isVerified           Boolean   @default(false)
+  verificationCode     String?   
+  codeExpiresAt        DateTime? // Define quando o código de 6 dígitos expira
+  verificationType     String?   // "EMAIL" ou "PHONE"
+
+  // --- DADOS PROFISSIONAIS E CATEGORIAS [ESTRUTURA SEO/B2C] ---
+  cpf                  String?
+  companyName          String?
+  description          String?
+  openHours            String?    
+  
+  // DICA DE OURO: Categorização para Descoberta e SEO
+  mainCategory         String    @default("Outros") // Ex: "Beleza & Estética"
+  categories           String[]  @default(["Outros"]) // Subcategorias/Especialidades. Ex: ["Barbearia", "Sobrancelhas"]
 
   // --- ENDEREÇO ESTRUTURADO ---
-  zipCode          String?    
-  street           String?    
-  number           String?    
-  neighborhood     String?    
-  city             String?    
-  state            String?    
-  country          String?    @default("Brasil")
-  complement       String?    
+  zipCode              String?    
+  street               String?    
+  number               String?    
+  neighborhood         String?    
+  city                 String?    
+  state                String?    
+  country              String?    @default("Brasil")
+  complement           String?    
    
-  // Geolocalização para buscas
-  latitude         Float?
-  longitude        Float?
+  // Geolocalização para buscas por proximidade
+  latitude             Float?
+  longitude            Float?
     
   // Configurações Profissional
-  serviceDuration  Int       @default(60)          
-  workStart        String    @default("09:00")    
-  workEnd          String    @default("18:00")    
+  serviceDuration      Int?       @default(60)           
+  workStart            String?    @default("08:00")  
+  workDays             String?  @default("1,2,3,4,5") // 0=Sun, 6=Sat  
+  workEnd              String?    @default("17:00")     
 
   // Financeiro
-  autoOpenRegister  Boolean   @default(false)
-  autoCloseRegister Boolean   @default(false)
-  defaultFloat      Float     @default(0.0)
+  autoOpenRegister     Boolean   @default(false)
+  autoCloseRegister    Boolean   @default(false)
+  defaultFloat         Float     @default(0.0)
 
   // Métricas
-  reputationScore   Float    @default(5.0) 
-  totalReviews      Int      @default(0)      
-  totalAppointments Int      @default(0)      
-  noShowCount       Int      @default(0)      
+  reputationScore      Float     @default(5.0) 
+  totalReviews         Int       @default(0)       
+  totalAppointments    Int       @default(0)       
+  noShowCount          Int       @default(0)       
 
   // Relacionamentos
-  services              Service[] 
-  appointmentsAsClient  Appointment[] @relation("ClientAppointments")
-  appointmentsAsPro     Appointment[] @relation("ProAppointments")
-  reviewsReceived       Review[]      @relation("ReviewReceiver")
-  reviewsGiven          Review[]      @relation("ReviewAuthor")
-  cashRegisters         CashRegister[]
-  messagesSent          ChatMessage[] @relation("SentMessages")
-  messagesReceived      ChatMessage[] @relation("ReceivedMessages")
+  services               Service[] 
+  appointmentsAsClient   Appointment[] @relation("ClientAppointments")
+  appointmentsAsPro      Appointment[] @relation("ProAppointments")
+  reviewsReceived        Review[]      @relation("ReviewReceiver")
+  reviewsGiven           Review[]      @relation("ReviewAuthor")
+  cashRegisters          CashRegister[]
+  messagesSent           ChatMessage[] @relation("SentMessages")
+  messagesReceived       ChatMessage[] @relation("ReceivedMessages")
   
-  // --- NOVOS RELACIONAMENTOS PARA NOTAS ---
-  notesWritten          ClientNote[] @relation("NotesWritten")
-  notesAboutMe          ClientNote[] @relation("NotesReceived")
+  // Relacionamentos para Notas Privadas
+  notesWritten           ClientNote[]  @relation("NotesWritten")
+  notesAboutMe           ClientNote[]  @relation("NotesReceived")
+
+    // --- LOGS ADMINISTRATIVOS ---
+  adminLogs   AdminLog[] @relation("AdminActions")
+  targetLogs  AdminLog[] @relation("TargetUser")
+
+  // --- NOVOS RELACIONAMENTOS DE DENÚNCIA ---
+  reportsMade            Report[]      @relation("Reporter")
+  reportsReceived        Report[]      @relation("Reported")
+  reportsResolved        Report[]      @relation("ReportResolver")
     
-  createdAt DateTime @default(now())
+  createdAt              DateTime      @default(now())
+}
+
+
+// --- TABELA DE DENÚNCIAS ---
+model Report {
+  id          String   @id @default(uuid())
+  reason      String   // "SPAM", "ASSEDIO", "FAKE", "OUTRO"
+  description String?  
+  status      String   @default("PENDING") // PENDING, RESOLVED, DISMISSED
+  
+  reporterId  String
+  reporter    User     @relation("Reporter", fields: [reporterId], references: [id])
+  
+  reportedId  String
+  reported    User     @relation("Reported", fields: [reportedId], references: [id])
+
+  resolverId  String?
+  resolver    User?    @relation("ReportResolver", fields: [resolverId], references: [id])
+  resolvedAt  DateTime?
+  
+  createdAt   DateTime @default(now())
+}
+
+// --- TABELA DE AUDITORIA (LOGS) ---
+model AdminLog {
+  id          String   @id @default(uuid())
+  action      String   // "BAN", "UNBAN", "VERIFY", "REVOKE", "DELETE", "PROMOTE"
+  details     String?  // Ex: "Baniu por 3 dias. Motivo: Spam"
+  
+  adminId     String
+  admin       User     @relation("AdminActions", fields: [adminId], references: [id])
+  
+  targetId    String
+  target      User     @relation("TargetUser", fields: [targetId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
 }
 
 model Service {
-  id          String @id @default(uuid())
+  id          String   @id @default(uuid())
   name        String 
   price       Float  
-  category    String  @default("Geral")
-  imageUrl    String? 
+  category    String   @default("Geral") 
+  imageUrl    String?
   description String? 
 
-  proId    String
-  pro      User   @relation(fields: [proId], references: [id])
+  proId       String
+  pro         User     @relation(fields: [proId], references: [id])
 }
 
 model Appointment {
-  id             String   @id @default(uuid())
-  date           DateTime 
-  status         String   @default("PENDING") 
-  serviceList    String?   
-  totalPrice     Float    @default(0.0)
-  clientConfirmed Boolean   @default(false) 
-  proConfirmed    Boolean   @default(false) 
+  id               String    @id @default(uuid())
+  seqId            Int       @default(autoincrement()) // ID Sequencial para MARKAI-000...
+  date             DateTime 
+  status           String    @default("PENDING") 
+  serviceList      String?
+  totalPrice       Float     @default(0.0)
+  clientConfirmed  Boolean   @default(false) 
+  proConfirmed     Boolean   @default(false) 
   
-  clientId       String
-  client         User     @relation("ClientAppointments", fields: [clientId], references: [id])
-  proId          String
-  professional   User     @relation("ProAppointments", fields: [proId], references: [id])
+  clientId         String
+  client           User      @relation("ClientAppointments", fields: [clientId], references: [id])
+  proId            String
+  professional     User      @relation("ProAppointments", fields: [proId], references: [id])
 
   rescheduleDate   DateTime?
   rescheduleReason String?
   rescheduleBy     String? 
 
-  cancelReason     String?    
+  cancelReason     String?
   cancelledBy      String?    
   
-  isFinishedEarly  Boolean  @default(false)
+  isFinishedEarly  Boolean   @default(false)
 
-  // MUDANÇA AQUI: "reviews" no plural e array []
   reviews          Review[] 
 
-  createdAt DateTime @default(now())
+  createdAt        DateTime  @default(now())
 }
 
 model Review {
   id            String      @id @default(uuid())
   rating        Int         
   comment       String?
-  
-  // MUDANÇA AQUI: Removemos o @unique do appointmentId
   appointmentId String      
   appointment   Appointment @relation(fields: [appointmentId], references: [id])
   
@@ -142,46 +202,45 @@ model Review {
   
   createdAt     DateTime    @default(now())
 
-  // MUDANÇA AQUI: Garante que um autor só avalie o mesmo agendamento 1 vez
   @@unique([appointmentId, authorId]) 
 }
 
 model CashRegister {
-  id            String   @id @default(uuid())
-  date          DateTime @default(now()) 
-  status        String   @default("OPEN") 
-  initialValue  Float    @default(0.0)    
-  totalIncome   Float    @default(0.0)    
-  finalValue    Float    @default(0.0)    
-  openedAt      DateTime @default(now())
-  closedAt      DateTime?
-  proId         String
-  professional  User     @relation(fields: [proId], references: [id])
+  id             String   @id @default(uuid())
+  date           DateTime @default(now()) 
+  status         String   @default("OPEN") 
+  initialValue   Float    @default(0.0)    
+  totalIncome    Float    @default(0.0)    
+  finalValue     Float    @default(0.0)    
+  openedAt       DateTime @default(now())
+  closedAt       DateTime?
+  proId          String
+  professional   User     @relation(fields: [proId], references: [id])
 }
 
 model ChatMessage {
-  id         String   @id @default(uuid())
-  content    String
-  createdAt  DateTime @default(now())
-  senderId   String
-  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
-  receiverId String
-  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  id           String   @id @default(uuid())
+  content      String
+  createdAt    DateTime @default(now())
+  senderId     String
+  sender       User     @relation("SentMessages", fields: [senderId], references: [id])
+  receiverId   String
+  receiver     User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  read         Boolean  @default(false) 
 }
 
-// --- NOVO MODEL: NOTAS PRIVADAS ---
 model ClientNote {
-  id        String   @id @default(uuid())
-  content   String   
+  id             String   @id @default(uuid())
+  content        String   
   
-  proId     String   
-  clientId  String   
+  proId          String   
+  clientId       String   
   
-  professional User @relation("NotesWritten", fields: [proId], references: [id])
-  client       User @relation("NotesReceived", fields: [clientId], references: [id])
+  professional   User     @relation("NotesWritten", fields: [proId], references: [id])
+  client         User     @relation("NotesReceived", fields: [clientId], references: [id])
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  @@unique([proId, clientId]) // Só uma nota por cliente/pro
+  @@unique([proId, clientId]) 
 }
