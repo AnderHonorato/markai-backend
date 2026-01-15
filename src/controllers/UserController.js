@@ -33,13 +33,9 @@ module.exports = {
       const emailLower = email ? email.toLowerCase().trim() : '';
       const cleanPhone = phone ? phone.replace(/\D/g, '') : '';
 
-      // Validações básicas
-      if (!emailLower || !name || !password || !cpf) {
-        return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
-      }
-
-      if (verificationMethod === 'PHONE' && !cleanPhone) {
-        return res.status(400).json({ error: 'Telefone é obrigatório para verificação via WhatsApp.' });
+      // Validação mínima para reenvio
+      if (!emailLower) {
+        return res.status(400).json({ error: 'Email é obrigatório.' });
       }
 
       console.log("🔍 [REGISTRO] Verificando se usuário já existe...");
@@ -52,31 +48,95 @@ module.exports = {
         } 
       });
       
+      // Se usuário já existe E está verificado, bloqueia
       if (existing && existing.isVerified) {
         console.log("❌ [REGISTRO] Usuário já cadastrado e verificado.");
         return res.status(400).json({ error: 'Usuário já cadastrado.' });
       }
 
+      // Se usuário existe mas NÃO está verificado, permite reenvio
+      if (existing && !existing.isVerified) {
+        console.log("🔄 [REGISTRO] Usuário não verificado. Reenviando código...");
+        
+        const code = Math.floor(100000 + Math.random() * 900000).toString(); 
+        const expires = new Date(Date.now() + 10 * 60000);
+
+        // Atualiza apenas o código e expiração
+        await prisma.user.update({
+          where: { id: existing.id },
+          data: {
+            verificationCode: code,
+            codeExpiresAt: expires,
+            verificationType: verificationMethod || existing.verificationType
+          }
+        });
+
+        console.log("✅ [REGISTRO] Código atualizado:", code);
+
+        // Tenta enviar o código
+        let enviouComSucesso = false;
+        
+        try {
+          if ((verificationMethod === 'PHONE' || existing.verificationType === 'PHONE') && (cleanPhone || existing.phone)) {
+            const phoneToUse = cleanPhone || existing.phone;
+            console.log("📱 [REGISTRO] Enviando via WhatsApp...");
+            await enviarMensagem(phoneToUse, `🔐 *MARKAÍ - Código de Verificação*\n\nSeu código é: *${code}*\n\nVálido por 10 minutos.`, true);
+            console.log("✅ [REGISTRO] WhatsApp enviado com sucesso!");
+            enviouComSucesso = true;
+          } else {
+            console.log("📧 [REGISTRO] Enviando via Email...");
+            await enviarEmailVerificacao(emailLower, code);
+            console.log("✅ [REGISTRO] Email enviado com sucesso!");
+            enviouComSucesso = true;
+          }
+        } catch (error) {
+          console.error("❌ [REGISTRO] Erro no envio primário:", error.message);
+          
+          // Fallback
+          try {
+            if (verificationMethod === 'PHONE' || existing.verificationType === 'PHONE') {
+              console.log("📧 [REGISTRO] Fallback: tentando email...");
+              await enviarEmailVerificacao(emailLower, code);
+              console.log("✅ [REGISTRO] Email enviado como fallback!");
+              enviouComSucesso = true;
+            } else {
+              console.log("📱 [REGISTRO] Fallback: tentando WhatsApp...");
+              if (cleanPhone || existing.phone) {
+                const phoneToUse = cleanPhone || existing.phone;
+                await enviarMensagem(phoneToUse, `🔐 *MARKAÍ - Código de Verificação*\n\nSeu código é: *${code}*\n\nVálido por 10 minutos.`, true);
+                console.log("✅ [REGISTRO] WhatsApp enviado como fallback!");
+                enviouComSucesso = true;
+              }
+            }
+          } catch (fallbackError) {
+            console.error("❌ [REGISTRO] Fallback também falhou:", fallbackError.message);
+          }
+        }
+
+        if (!enviouComSucesso) {
+          console.error("❌ [REGISTRO] Nenhum método de envio funcionou");
+          return res.status(500).json({ error: 'Não foi possível enviar o código de verificação. Tente novamente.' });
+        }
+
+        return res.json({ success: true, expiresAt: expires });
+      }
+
+      // NOVO CADASTRO - Validações completas
+      if (!name || !password || !cpf) {
+        return res.status(400).json({ error: 'Preencha todos os campos obrigatórios.' });
+      }
+
+      if (verificationMethod === 'PHONE' && !cleanPhone) {
+        return res.status(400).json({ error: 'Telefone é obrigatório para verificação via WhatsApp.' });
+      }
+
       // Gera código de 6 dígitos
       const code = Math.floor(100000 + Math.random() * 900000).toString(); 
-      const expires = new Date(Date.now() + 10 * 60000); // 10 min
+      const expires = new Date(Date.now() + 10 * 60000);
 
-      console.log("💾 [REGISTRO] Salvando/atualizando usuário no banco...");
-      await prisma.user.upsert({ 
-        where: { email: emailLower }, 
-        update: { 
-          verificationCode: code, 
-          codeExpiresAt: expires, 
-          verificationType: verificationMethod, 
-          phone: cleanPhone, 
-          name, 
-          password, 
-          type, 
-          companyName: companyName || "", 
-          cpf, 
-          isVerified: false 
-        }, 
-        create: { 
+      console.log("💾 [REGISTRO] Criando novo usuário no banco...");
+      await prisma.user.create({ 
+        data: { 
           email: emailLower, 
           name, 
           password, 
@@ -91,7 +151,7 @@ module.exports = {
         } 
       });
 
-      console.log("✅ [REGISTRO] Usuário salvo. Código gerado:", code);
+      console.log("✅ [REGISTRO] Usuário criado. Código gerado:", code);
 
       // Envio síncrono do código
       console.log("📤 [REGISTRO] Tentando enviar código...");
@@ -418,8 +478,8 @@ module.exports = {
         return res.json(reports);
     } catch (error) { return res.status(500).json({ error: 'Erro ao listar reports.' }); }
   },
-
-  async resolveReport(req, res) {
+        
+ async resolveReport(req, res) {
       const { id } = req.params; const { status, requesterId } = req.body;
       if (!requesterId) return res.status(400).json({ error: 'ID admin necessário.' });
       try {
@@ -479,7 +539,7 @@ module.exports = {
               prisma.adminLog.count({ where: { action: 'BAN', createdAt: { gte: startLastMonth, lt: startThisMonth } } })
           ]);
 
-                   return res.json({
+          return res.json({
               users: { total: totalUsers, current: usersThisMonth, previous: usersLastMonth },
               bans: { total: totalBans, current: bansThisMonth, previous: bansLastMonth }
           });
@@ -501,7 +561,8 @@ module.exports = {
 
       const target = await prisma.user.findUnique({ where: { id } });
       if (target.email === 'contato.markaiapp@gmail.com') return res.status(403).json({ error: 'Impossível banir o Owner.' });
-                 let banDate = null;
+
+      let banDate = null;
       let finalReason = null;
       if (days && parseInt(days) > 0) {
         const date = new Date();
@@ -592,6 +653,7 @@ module.exports = {
       return res.json(updated);
     } catch (error) { return res.status(500).json({ error: 'Erro cargo.' }); }
   },
+
   async adminWarnUser(req, res) {
     const { id } = req.params;
     const { requesterId, message, reportId } = req.body;
@@ -632,4 +694,4 @@ module.exports = {
           return res.json({ success: true });
       } catch (error) { return res.status(500).json({ error: 'Erro ao limpar.' }); }
   },
-};
+};        
