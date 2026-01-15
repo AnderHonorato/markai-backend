@@ -23,8 +23,6 @@ async function getCoordinates(data) {
 
 module.exports = {
   // 1. INICIAR REGISTRO (Envia código) - CORRIGIDO
-// backend/src/controllers/UserController.js - registerIntent OTIMIZADO
-
   async registerIntent(req, res) {
     const { email, phone, verificationMethod, name, password, type, companyName, cpf } = req.body;
     
@@ -95,71 +93,57 @@ module.exports = {
 
       console.log("✅ [REGISTRO] Usuário salvo. Código gerado:", code);
 
-      // ============================================
-      // RESPOSTA IMEDIATA (antes de enviar código)
-      // ============================================
-      res.json({ 
-        success: true, 
-        expiresAt: expires,
-        debugCode: process.env.NODE_ENV === 'development' ? code : undefined
-      });
-
-      // ============================================
-      // ENVIO ASSÍNCRONO (não bloqueia a resposta)
-      // ============================================
-      console.log("📤 [REGISTRO] Iniciando envio assíncrono do código...");
+      // Envio síncrono do código
+      console.log("📤 [REGISTRO] Tentando enviar código...");
       
-      // Promise com timeout de 15 segundos
-      const enviarComTimeout = (promise, timeout = 15000) => {
-        return Promise.race([
-          promise,
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), timeout)
-          )
-        ]);
-      };
-
-      // Tentar enviar (assíncrono, não bloqueia)
-      (async () => {
-        try {
-          if (verificationMethod === 'PHONE' && cleanPhone) {
-            console.log("📱 [REGISTRO] Tentando enviar via WhatsApp...");
-            await enviarComTimeout(
-              enviarMensagem(cleanPhone, `🔐 *MARKAÍ - Código de Verificação*\n\nSeu código é: *${code}*\n\nVálido por 10 minutos.`, true)
-            );
-            console.log("✅ [REGISTRO] WhatsApp enviado!");
-          } else {
-            console.log("📧 [REGISTRO] Tentando enviar via Email...");
-            await enviarComTimeout(
-              enviarEmailVerificacao(emailLower, code)
-            );
-            console.log("✅ [REGISTRO] Email enviado!");
-          }
-        } catch (error) {
-          console.error("❌ [REGISTRO] Erro no envio:", error.message);
-          
-          // Fallback: tentar outro método se falhar
-          try {
-            if (verificationMethod === 'PHONE') {
-              console.log("📧 [REGISTRO] Fallback: tentando email...");
-              await enviarComTimeout(
-                enviarEmailVerificacao(emailLower, code)
-              );
-              console.log("✅ [REGISTRO] Email enviado como fallback!");
-            }
-          } catch (fallbackError) {
-            console.error("❌ [REGISTRO] Fallback também falhou:", fallbackError.message);
-          }
+      let enviouComSucesso = false;
+      
+      try {
+        if (verificationMethod === 'PHONE' && cleanPhone) {
+          console.log("📱 [REGISTRO] Enviando via WhatsApp...");
+          await enviarMensagem(cleanPhone, `🔐 *MARKAÍ - Código de Verificação*\n\nSeu código é: *${code}*\n\nVálido por 10 minutos.`, true);
+          console.log("✅ [REGISTRO] WhatsApp enviado com sucesso!");
+          enviouComSucesso = true;
+        } else {
+          console.log("📧 [REGISTRO] Enviando via Email...");
+          await enviarEmailVerificacao(emailLower, code);
+          console.log("✅ [REGISTRO] Email enviado com sucesso!");
+          enviouComSucesso = true;
         }
-      })();
+      } catch (error) {
+        console.error("❌ [REGISTRO] Erro no envio primário:", error.message);
+        
+        // Fallback: tentar outro método se falhar
+        try {
+          if (verificationMethod === 'PHONE') {
+            console.log("📧 [REGISTRO] Fallback: tentando email...");
+            await enviarEmailVerificacao(emailLower, code);
+            console.log("✅ [REGISTRO] Email enviado como fallback!");
+            enviouComSucesso = true;
+          } else {
+            console.log("📱 [REGISTRO] Fallback: tentando WhatsApp...");
+            if (cleanPhone) {
+              await enviarMensagem(cleanPhone, `🔐 *MARKAÍ - Código de Verificação*\n\nSeu código é: *${code}*\n\nVálido por 10 minutos.`, true);
+              console.log("✅ [REGISTRO] WhatsApp enviado como fallback!");
+              enviouComSucesso = true;
+            }
+          }
+        } catch (fallbackError) {
+          console.error("❌ [REGISTRO] Fallback também falhou:", fallbackError.message);
+        }
+      }
+
+      if (!enviouComSucesso) {
+        console.error("❌ [REGISTRO] Nenhum método de envio funcionou");
+        return res.status(500).json({ error: 'Não foi possível enviar o código de verificação. Tente novamente.' });
+      }
+
+      res.json({ success: true, expiresAt: expires });
 
     } catch (error) { 
       console.error("💥 [REGISTRO] ERRO CRÍTICO:", error);
       console.error("Stack trace:", error.stack);
-      return res.status(500).json({ 
-        error: 'Erro no cadastro.',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
-      }); 
+      return res.status(500).json({ error: 'Erro no cadastro.' }); 
     }
   },
 
@@ -244,7 +228,30 @@ module.exports = {
       
       await prisma.user.update({ where: { id: user.id }, data: { verificationCode: code, codeExpiresAt: expires } });
       
-      if (user.phone) await enviarMensagem(user.phone, `🔑 *MARKAI:* Recuperação: *${code}*`, true); 
+      // Tenta enviar por WhatsApp primeiro
+      let enviouComSucesso = false;
+      try {
+        if (user.phone) {
+          await enviarMensagem(user.phone, `🔑 *MARKAI:* Recuperação: *${code}*`, true);
+          enviouComSucesso = true;
+        }
+      } catch (error) {
+        console.error("Erro ao enviar WhatsApp na recuperação:", error);
+      }
+      
+      // Fallback para email se WhatsApp falhar ou não tiver phone
+      if (!enviouComSucesso) {
+        try {
+          await enviarEmailVerificacao(user.email, code);
+          enviouComSucesso = true;
+        } catch (error) {
+          console.error("Erro ao enviar email na recuperação:", error);
+        }
+      }
+      
+      if (!enviouComSucesso) {
+        return res.status(500).json({ error: 'Não foi possível enviar o código de recuperação.' });
+      }
       
       return res.json({ success: true, email: user.email });
     } catch (error) { return res.status(500).json({ error: 'Erro ao recuperar senha.' }); }
@@ -472,7 +479,7 @@ module.exports = {
               prisma.adminLog.count({ where: { action: 'BAN', createdAt: { gte: startLastMonth, lt: startThisMonth } } })
           ]);
 
-          return res.json({
+                   return res.json({
               users: { total: totalUsers, current: usersThisMonth, previous: usersLastMonth },
               bans: { total: totalBans, current: bansThisMonth, previous: bansLastMonth }
           });
@@ -494,8 +501,7 @@ module.exports = {
 
       const target = await prisma.user.findUnique({ where: { id } });
       if (target.email === 'contato.markaiapp@gmail.com') return res.status(403).json({ error: 'Impossível banir o Owner.' });
-
-      let banDate = null;
+                 let banDate = null;
       let finalReason = null;
       if (days && parseInt(days) > 0) {
         const date = new Date();
@@ -586,7 +592,6 @@ module.exports = {
       return res.json(updated);
     } catch (error) { return res.status(500).json({ error: 'Erro cargo.' }); }
   },
-
   async adminWarnUser(req, res) {
     const { id } = req.params;
     const { requesterId, message, reportId } = req.body;
