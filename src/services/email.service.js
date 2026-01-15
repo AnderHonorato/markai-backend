@@ -2,15 +2,26 @@
 
 const { Resend } = require('resend');
 
-// Inicializar Resend com API Key (use variável de ambiente)
-const resend = new Resend(process.env.RESEND_API_KEY || 're_Y2nV1DoP_KLf6WgC8Rfa9EUpNovEavsJ5');
+// API Key configurada diretamente
+const resend = new Resend('re_6Hicwqst_MrnvM2kJsWgYAYjbsDgwDsb5');
+
+/**
+ * 🔧 CONFIGURAÇÃO DE PRODUÇÃO:
+ * 
+ * ✅ Domínio verificado: xn--marka-3sa.app.br
+ * ✅ Subdomínio de envio: send.xn--marka-3sa.app.br
+ * ✅ Email remetente: noreply@send.xn--marka-3sa.app.br
+ */
+
+const SENDER_EMAIL = 'Markaí <noreply@send.xn--marka-3sa.app.br>';
 
 async function enviarEmailVerificacao(destino, codigo) {
   console.log(`📧 [EMAIL] Iniciando envio via Resend para: ${destino}`);
+  console.log(`📧 [EMAIL] Remetente: ${SENDER_EMAIL}`);
   
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Markaí <onboarding@resend.dev>', // Domínio de teste (funciona imediatamente)
+      from: SENDER_EMAIL,
       to: destino,
       subject: '🔐 Seu código de verificação Markaí',
       html: `
@@ -42,14 +53,18 @@ async function enviarEmailVerificacao(destino, codigo) {
             </p>
 
             <p style="color: #888; font-size: 13px; line-height: 1.6; margin: 25px 0 0 0; padding-top: 20px; border-top: 1px solid #eee;">
-              💡 <em>Dica:</em> Se você não solicitou este código, ignore este email.
+              🔒 <strong>Segurança:</strong> Nunca compartilhe este código com ninguém. Nossa equipe jamais solicitará este código por telefone, WhatsApp ou email.
+            </p>
+
+            <p style="color: #888; font-size: 13px; line-height: 1.6; margin: 10px 0 0 0;">
+              💡 <em>Dica:</em> Se você não solicitou este código, ignore este email com segurança.
             </p>
           </div>
 
           <!-- Footer -->
           <div style="background-color: #f4f6f9; padding: 25px 30px; text-align: center; border-top: 1px solid #e0e0e0;">
             <p style="color: #888; font-size: 12px; margin: 0;">
-              © 2026 Markaí - Todos os direitos reservados
+              © ${new Date().getFullYear()} Markaí - Todos os direitos reservados
             </p>
             <p style="color: #999; font-size: 11px; margin: 10px 0 0 0;">
               Este é um email automático, por favor não responda.
@@ -58,25 +73,57 @@ async function enviarEmailVerificacao(destino, codigo) {
 
         </div>
       `,
+      text: `
+MARKAÍ - Código de Verificação
+
+Bem-vindo ao Markaí! 🎉
+
+Seu código de verificação é: ${codigo}
+
+⏰ Este código expira em 10 minutos.
+
+🔒 IMPORTANTE: Nunca compartilhe este código com ninguém.
+
+Se você não solicitou este código, ignore este email.
+
+---
+© ${new Date().getFullYear()} Markaí
+      `.trim()
     });
 
     if (error) {
-      console.error("❌ [EMAIL] Erro Resend:", error);
-      throw new Error(error.message);
+      console.error("❌ [EMAIL] Erro Resend:", {
+        statusCode: error.statusCode,
+        name: error.name,
+        message: error.message
+      });
+      throw new Error(`Falha no envio: ${error.message || error.name}`);
     }
 
     console.log("✅ [EMAIL] Email enviado com sucesso via Resend!");
-    console.log("   📧 Para:", destino);
-    console.log("   🆔 ID:", data?.id);
-    console.log("   ⚠️  IMPORTANTE: Verifique a pasta SPAM/LIXO ELETRÔNICO");
+    console.log("   📧 Destinatário:", destino);
+    console.log("   📤 Remetente:", SENDER_EMAIL);
+    console.log("   🆔 ID da mensagem:", data?.id);
     console.log("   🔗 Dashboard: https://resend.com/emails");
+    console.log("   💡 Lembre o usuário de verificar SPAM/LIXO ELETRÔNICO");
+    
     return true;
 
   } catch (error) {
     console.error("❌ [EMAIL] Erro ao enviar via Resend:", error.message);
-    if (error.statusCode) {
-      console.error("   Status:", error.statusCode);
+    
+    if (error.statusCode === 403) {
+      console.error("   🚫 ERRO 403: Domínio não verificado ou remetente inválido");
+      console.error("   📋 Verifique:");
+      console.error("      1. DNS records no painel Resend estão todos ✅");
+      console.error("      2. Email remetente: noreply@send.xn--marka-3sa.app.br");
+      console.error("      3. Aguarde até 30min para propagação DNS");
+    } else if (error.statusCode === 429) {
+      console.error("   ⏱️  ERRO 429: Limite de taxa excedido");
+    } else if (error.statusCode) {
+      console.error("   📊 Status HTTP:", error.statusCode);
     }
+    
     throw error;
   }
 }
