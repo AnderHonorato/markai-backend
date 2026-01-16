@@ -694,4 +694,107 @@ module.exports = {
           return res.json({ success: true });
       } catch (error) { return res.status(500).json({ error: 'Erro ao limpar.' }); }
   },
+  async adminSendGlobalMessage(req, res) {
+    const { requesterId, message, type, targetGroup } = req.body;
+
+    if (!requesterId || !message) {
+      return res.status(400).json({ error: 'Dados incompletos.' });
+    }
+
+    try {
+      const requester = await prisma.user.findUnique({ where: { id: requesterId } });
+      const isOwner = requester?.email === 'contato.markaiapp@gmail.com';
+      const isMod = requester?.role === 'MODERATOR';
+
+      if (!isOwner && !isMod) {
+        return res.status(403).json({ error: 'Sem permissão.' });
+      }
+
+      let whereCondition = {};
+      if (targetGroup === 'professionals') whereCondition = { type: 'PROFESSIONAL' };
+      else if (targetGroup === 'clients') whereCondition = { type: 'CLIENT' };
+      else if (targetGroup === 'verified') whereCondition = { isVerified: true };
+      else if (targetGroup === 'unverified') whereCondition = { isVerified: false };
+
+      const users = await prisma.user.findMany({ where: whereCondition, select: { id: true } });
+
+      const notificationField = type === 'warning' ? 'activeWarning' : 'activeFeedback';
+
+      await Promise.all(users.map(user => 
+        prisma.user.update({
+          where: { id: user.id },
+          data: { [notificationField]: message }
+        })
+      ));
+
+      await prisma.adminLog.create({
+        data: {
+          action: 'GLOBAL_MESSAGE',
+          details: `Tipo: ${type}, Grupo: ${targetGroup || 'all'}, Msg: "${message.substring(0, 50)}"`,
+          adminId: requesterId,
+          targetId: null
+        }
+      });
+
+      return res.json({ success: true, sentTo: users.length });
+
+    } catch (error) {
+      console.error('Erro ao enviar mensagem global:', error);
+      return res.status(500).json({ error: 'Erro ao enviar mensagem global.' });
+    }
+  },
+
+  async adminClearGlobalMessages(req, res) {
+    const { requesterId, type } = req.body;
+
+    if (!requesterId) return res.status(400).json({ error: 'ID admin necessário.' });
+
+    try {
+      const requester = await prisma.user.findUnique({ where: { id: requesterId } });
+      
+      if (requester?.email !== 'contato.markaiapp@gmail.com') {
+        return res.status(403).json({ error: 'Apenas o Owner pode limpar mensagens globais.' });
+      }
+
+      let updateData = {};
+      if (type === 'warning' || type === 'all') updateData.activeWarning = null;
+      if (type === 'info' || type === 'all') updateData.activeFeedback = null;
+
+      const result = await prisma.user.updateMany({ data: updateData });
+
+      return res.json({ success: true, cleared: result.count });
+
+    } catch (error) {
+      return res.status(500).json({ error: 'Erro ao limpar mensagens.' });
+    }
+  },
+
+  async adminGetMessageStats(req, res) {
+    const { requesterId } = req.query;
+
+    if (!requesterId) return res.status(400).json({ error: 'ID necessário.' });
+
+    try {
+      const requester = await prisma.user.findUnique({ where: { id: requesterId } });
+      
+      if (!requester || (requester.email !== 'contato.markaiapp@gmail.com' && requester.role !== 'MODERATOR')) {
+        return res.status(403).json({ error: 'Sem permissão.' });
+      }
+
+      const [warningsCount, feedbackCount] = await Promise.all([
+        prisma.user.count({ where: { activeWarning: { not: null } } }),
+        prisma.user.count({ where: { activeFeedback: { not: null } } })
+      ]);
+
+      return res.json({
+        activeWarnings: warningsCount,
+        activeFeedback: feedbackCount,
+        total: warningsCount + feedbackCount
+      });
+
+    } catch (error) {
+      return res.status(500).json({ error: 'Erro ao obter estatísticas.' });
+    }
+  },
+ 
 };        
