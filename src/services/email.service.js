@@ -2,18 +2,20 @@
 
 const { Resend } = require('resend');
 
-// API Key configurada diretamente
+// API Key configurada
 const resend = new Resend('re_6Hicwqst_MrnvM2kJsWgYAYjbsDgwDsb5');
 
 /**
  * 🔧 CONFIGURAÇÃO DE PRODUÇÃO:
  * 
- * ✅ Domínio verificado: xn--marka-3sa.app.br
- * ✅ Subdomínio de envio: send.xn--marka-3sa.app.br
- * ✅ Email remetente: noreply@send.xn--marka-3sa.app.br
+ * ✅ Domínio verificado no Resend: xn--marka-3sa.app.br
+ * ✅ Email remetente: noreply@xn--marka-3sa.app.br (SEM o 'send.')
+ * 
+ * IMPORTANTE: O subdomínio 'send' é apenas para records DNS (SPF/MX),
+ * mas o email deve usar o domínio raiz verificado.
  */
 
-const SENDER_EMAIL = 'Markaí <noreply@send.xn--marka-3sa.app.br>';
+const SENDER_EMAIL = 'Markaí <noreply@xn--marka-3sa.app.br>';
 
 async function enviarEmailVerificacao(destino, codigo) {
   console.log(`📧 [EMAIL] Iniciando envio via Resend para: ${destino}`);
@@ -21,7 +23,7 @@ async function enviarEmailVerificacao(destino, codigo) {
   
   try {
     const { data, error } = await resend.emails.send({
-      from: SENDER_EMAIL,
+      from: SENDER_EMAIL, // ✅ Usando domínio raiz verificado
       to: destino,
       subject: '🔐 Seu código de verificação Markaí',
       html: `
@@ -105,7 +107,7 @@ Se você não solicitou este código, ignore este email.
     console.log("   📤 Remetente:", SENDER_EMAIL);
     console.log("   🆔 ID da mensagem:", data?.id);
     console.log("   🔗 Dashboard: https://resend.com/emails");
-    console.log("   💡 Lembre o usuário de verificar SPAM/LIXO ELETRÔNICO");
+    console.log("   💡 Verifique SPAM/LIXO ELETRÔNICO");
     
     return true;
 
@@ -113,13 +115,14 @@ Se você não solicitou este código, ignore este email.
     console.error("❌ [EMAIL] Erro ao enviar via Resend:", error.message);
     
     if (error.statusCode === 403) {
-      console.error("   🚫 ERRO 403: Domínio não verificado ou remetente inválido");
-      console.error("   📋 Verifique:");
-      console.error("      1. DNS records no painel Resend estão todos ✅");
-      console.error("      2. Email remetente: noreply@send.xn--marka-3sa.app.br");
-      console.error("      3. Aguarde até 30min para propagação DNS");
+      console.error("   🚫 ERRO 403: Problema com domínio");
+      console.error("   📋 Ações necessárias:");
+      console.error("      1. Acesse: https://resend.com/domains");
+      console.error("      2. Verifique se 'xn--marka-3sa.app.br' está com status ✅");
+      console.error("      3. Confirme que todos os DNS records estão corretos");
+      console.error("      4. Aguarde até 48h para propagação DNS completa");
     } else if (error.statusCode === 429) {
-      console.error("   ⏱️  ERRO 429: Limite de taxa excedido");
+      console.error("   ⏱️  ERRO 429: Muitas requisições");
     } else if (error.statusCode) {
       console.error("   📊 Status HTTP:", error.statusCode);
     }
