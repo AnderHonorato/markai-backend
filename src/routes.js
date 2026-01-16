@@ -84,10 +84,9 @@ routes.delete('/admin/reports/:id', UserController.deleteReport);
 routes.post('/admin/users/:id/warn', UserController.adminWarnUser);
 routes.post('/users/:id/warnings/dismiss', UserController.dismissWarning);
 routes.post('/users/:id/feedback/dismiss', UserController.dismissFeedback);
-router.post('/admin/global-message', UserController.adminSendGlobalMessage);
-router.post('/admin/clear-messages', UserController.adminClearGlobalMessages);
-router.get('/admin/message-stats', UserController.adminGetMessageStats);
-
+routes.post('/admin/global-message', UserController.adminSendGlobalMessage);
+routes.post('/admin/clear-messages', UserController.adminClearGlobalMessages);
+routes.get('/admin/message-stats', UserController.adminGetMessageStats);
 console.log('✅ Rotas carregadas com sucesso');
 
 module.exports = routes;
