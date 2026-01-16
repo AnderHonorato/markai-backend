@@ -66,8 +66,6 @@ routes.post('/cash/reopen', CashController.reopen);
 routes.post('/notes', NoteController.saveNote);
 routes.get('/notes', NoteController.getNote);
 
-// SLUG
-routes.get('/:slug', UserController.getBySlug); 
 
 // --- ROTAS ADMINISTRATIVAS ---
 routes.get('/admin/users', UserController.adminListUsers);
@@ -87,6 +85,12 @@ routes.post('/users/:id/feedback/dismiss', UserController.dismissFeedback);
 routes.post('/admin/global-message', UserController.adminSendGlobalMessage);
 routes.post('/admin/clear-messages', UserController.adminClearGlobalMessages);
 routes.get('/admin/message-stats', UserController.adminGetMessageStats);
+
+// ===============================
+// SLUG (SEMPRE POR ÚLTIMO)
+// ===============================
+routes.get('/:slug', UserController.getBySlug);
+
 console.log('✅ Rotas carregadas com sucesso');
 
 module.exports = routes;
