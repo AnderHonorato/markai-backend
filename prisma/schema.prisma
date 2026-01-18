@@ -39,10 +39,13 @@ model User {
   notificationSettings String? @default("60") // Minutos antes para avisar (ex: "60")
 
   // --- SEGURANÇA E VERIFICAÇÃO ROBUSTA ---
-  isVerified           Boolean   @default(false)
+  isAccountActive      Boolean @default(false)
   verificationCode     String?   
   codeExpiresAt        DateTime? // Define quando o código de 6 dígitos expira
   verificationType     String?   // "EMAIL" ou "PHONE"
+
+  //PARA O SELO AZUL
+  isVerified           Boolean   @default(false)
 
   // --- DADOS PROFISSIONAIS E CATEGORIAS [ESTRUTURA SEO/B2C] ---
   cpf                  String?
@@ -107,7 +110,14 @@ model User {
   reportsMade            Report[]      @relation("Reporter")
   reportsReceived        Report[]      @relation("Reported")
   reportsResolved        Report[]      @relation("ReportResolver")
-    
+  
+  // --- BLOG ---
+  blogPosts     BlogPost[]    @relation("BlogAuthor")
+  blogComments  BlogComment[]
+  blogLikes     BlogLike[]
+
+  verificationRequests VerificationRequest[]
+
   createdAt              DateTime      @default(now())
 }
 
@@ -229,6 +239,18 @@ model ChatMessage {
   read         Boolean  @default(false) 
 }
 
+model VerificationRequest {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  documentImg String   @db.Text // Base64 da foto do documento
+  selfieImg   String   @db.Text // Base64 da selfie
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  reason      String?
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+}
+
 model ClientNote {
   id             String   @id @default(uuid())
   content        String   
@@ -243,4 +265,63 @@ model ClientNote {
   updatedAt      DateTime @updatedAt
 
   @@unique([proId, clientId]) 
+}
+
+model BlogPost {
+  id          String   @id @default(uuid())
+  title       String
+  content     String   @db.Text
+  imageUrl    String?  @db.Text
+  
+  status      String   @default("PUBLISHED")
+  viewCount   Int      @default(0)
+  
+  authorId    String
+  author      User     @relation("BlogAuthor", fields: [authorId], references: [id])
+  
+  likes       BlogLike[]
+  comments    BlogComment[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BlogComment {
+  id          String   @id @default(uuid())
+  content     String   @db.Text
+  viewCount   Int      @default(0)
+  
+  status      String   @default("VISIBLE")
+  postId      String
+  post        BlogPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  authorId    String
+  author      User     @relation(fields: [authorId], references: [id])
+
+  // Sistema de Resposta (Comentário em Comentário)
+  parentId    String?  
+  parent      BlogComment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  children    BlogComment[] @relation("CommentReplies")
+
+  likes       BlogLike[]
+
+  createdAt   DateTime @default(now())
+}
+
+model BlogLike {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+
+  // Polimorfismo simplificado (Ou curte Post ou curte Comentário)
+  postId      String?
+  post        BlogPost? @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  commentId   String?
+  comment     BlogComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, postId]) // Um like por post
+  @@unique([userId, commentId]) // Um like por comentário
 }

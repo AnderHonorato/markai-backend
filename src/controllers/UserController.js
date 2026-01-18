@@ -1,5 +1,3 @@
-// backend/src/controllers/UserController.js
-
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const axios = require('axios');
@@ -520,20 +518,33 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro lista admin.' }); }
   },
 
-  async adminGetStats(req, res) {
+async adminGetStats(req, res) {
       const { requesterId } = req.query;
       try {
           const requester = await prisma.user.findUnique({ where: { id: requesterId } });
-          if (!requester || (requester.email !== 'contato.markaiapp@gmail.com' && requester.role !== 'MODERATOR')) return res.status(403).json({ error: 'Sem permissão.' });
+          // Permite Owner e Moderador
+          if (!requester || (requester.email !== 'contato.markaiapp@gmail.com' && requester.role !== 'MODERATOR')) {
+              return res.status(403).json({ error: 'Sem permissão.' });
+          }
 
           const now = new Date();
           const startThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
           const startLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
-          const [totalUsers, usersThisMonth, usersLastMonth, totalBans, bansThisMonth, bansLastMonth] = await Promise.all([
-              prisma.user.count(),
-              prisma.user.count({ where: { createdAt: { gte: startThisMonth } } }),
-              prisma.user.count({ where: { createdAt: { gte: startLastMonth, lt: startThisMonth } } }),
+          // Consultas Paralelas para performance
+          const [
+              totalUsers, 
+              usersThisMonth, 
+              usersLastMonth, 
+              totalBans, 
+              bansThisMonth, 
+              bansLastMonth
+          ] = await Promise.all([
+              prisma.user.count(), // Total Usuários
+              prisma.user.count({ where: { createdAt: { gte: startThisMonth } } }), // Novos este mês
+              prisma.user.count({ where: { createdAt: { gte: startLastMonth, lt: startThisMonth } } }), // Novos mês passado
+              
+              // Total Banimentos (Histórico de logs com ação 'BAN')
               prisma.adminLog.count({ where: { action: 'BAN' } }),
               prisma.adminLog.count({ where: { action: 'BAN', createdAt: { gte: startThisMonth } } }),
               prisma.adminLog.count({ where: { action: 'BAN', createdAt: { gte: startLastMonth, lt: startThisMonth } } })
@@ -543,7 +554,10 @@ module.exports = {
               users: { total: totalUsers, current: usersThisMonth, previous: usersLastMonth },
               bans: { total: totalBans, current: bansThisMonth, previous: bansLastMonth }
           });
-      } catch (error) { return res.status(500).json({ error: 'Erro stats.' }); }
+      } catch (error) { 
+          console.error("Erro ao buscar stats:", error);
+          return res.status(500).json({ error: 'Erro stats.' }); 
+      }
   },
 
   async adminBanUser(req, res) {
@@ -694,7 +708,11 @@ module.exports = {
           return res.json({ success: true });
       } catch (error) { return res.status(500).json({ error: 'Erro ao limpar.' }); }
   },
+<<<<<<< HEAD
   async adminSendGlobalMessage(req, res) {
+=======
+async adminSendGlobalMessage(req, res) {
+>>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)
     const { requesterId, message, type, targetGroup } = req.body;
 
     if (!requesterId || !message) {
@@ -720,6 +738,7 @@ module.exports = {
 
       const notificationField = type === 'warning' ? 'activeWarning' : 'activeFeedback';
 
+<<<<<<< HEAD
       await Promise.all(users.map(user => 
         prisma.user.update({
           where: { id: user.id },
@@ -736,6 +755,36 @@ module.exports = {
         }
       });
 
+=======
+      await prisma.user.updateMany({
+        where: whereCondition,
+        data: { [notificationField]: message }
+      });
+
+      // --- CORREÇÃO DO LOG ---
+      // Removemos targetId: null e montamos o objeto de dados dinamicamente
+      const logData = {
+          action: 'GLOBAL_MESSAGE',
+          details: `Tipo: ${type}, Grupo: ${targetGroup || 'all'}, Msg: "${message.substring(0, 50)}..."`,
+          admin: { connect: { id: requesterId } }
+      };
+
+      // Se o seu Schema.prisma obrigar um target, usamos o próprio admin como alvo para não dar erro
+      // Se for opcional, o Prisma simplesmente ignora a falta do campo.
+      try {
+        await prisma.adminLog.create({ data: logData });
+      } catch (logError) {
+         // Fallback: Se der erro dizendo que target é missing, conectamos ao admin
+         if (logError.message.includes('target')) {
+             await prisma.adminLog.create({
+                 data: { ...logData, target: { connect: { id: requesterId } } }
+             });
+         } else {
+             console.log("Aviso: Falha ao criar log, mas msg enviada.", logError.message);
+         }
+      }
+
+>>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)
       return res.json({ success: true, sentTo: users.length });
 
     } catch (error) {
@@ -796,5 +845,34 @@ module.exports = {
       return res.status(500).json({ error: 'Erro ao obter estatísticas.' });
     }
   },
+<<<<<<< HEAD
  
 };        
+=======
+
+  async adminListVerifications(req, res) {
+  const { requesterId } = req.query;
+  try {
+    // Verifica se é admin
+    const requester = await prisma.user.findUnique({ where: { id: requesterId } });
+    if (!requester || (requester.role !== 'MODERATOR' && requester.role !== 'OWNER')) {
+       return res.status(403).json({ error: 'Sem permissão.' });
+    }
+
+    // Busca usuários que enviaram documentos mas ainda não estão verificados
+    // (Ajuste conforme seu Schema, aqui estou assumindo uma tabela VerificationRequest ou usuários com flag pendente)
+    // Se você não tiver tabela de verificação, crie ou adapte essa query:
+    const requests = await prisma.verificationRequest.findMany({
+        where: { status: 'PENDING' },
+        include: { user: true }
+    });
+    
+    return res.json(requests);
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({ error: 'Erro ao listar verificações' });
+  }
+},
+ 
+};        
+>>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)

@@ -12,6 +12,8 @@ const AIController = require('./controllers/AIController');
 const WhatsappController = require('./controllers/WhatsappController');
 routes.post('/whatsapp/disconnect', WhatsappController.disconnect); // Nova
 routes.get('/whatsapp/status/:userId', WhatsappController.getStatus); // Nova
+// --- ROTAS DO BLOG ---
+const BlogController = require('./controllers/BlogController');
 
 routes.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.path}`);
@@ -66,6 +68,23 @@ routes.post('/cash/reopen', CashController.reopen);
 routes.post('/notes', NoteController.saveNote);
 routes.get('/notes', NoteController.getNote);
 
+<<<<<<< HEAD
+=======
+// --- BLOG DO DESENVOLVEDOR ---
+routes.get('/blog/latest', BlogController.getLatest); // ← MOVIDO PARA CIMA
+routes.get('/blog', BlogController.list);
+routes.get('/blog/:id', BlogController.getOne); // DETALHE + COMMENTS
+routes.post('/blog', BlogController.create);
+routes.put('/blog/:id', BlogController.update);
+routes.delete('/blog/:id', BlogController.delete);
+
+// Rotas Sociais Blog
+routes.post('/blog/like', BlogController.toggleLikePost);
+routes.post('/blog/comment/like', BlogController.toggleLikeComment);
+routes.post('/blog/comment', BlogController.createComment);
+routes.delete('/blog/comment/:id', BlogController.deleteComment);
+
+>>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)
 
 // --- ROTAS ADMINISTRATIVAS ---
 routes.get('/admin/users', UserController.adminListUsers);
@@ -85,7 +104,12 @@ routes.post('/users/:id/feedback/dismiss', UserController.dismissFeedback);
 routes.post('/admin/global-message', UserController.adminSendGlobalMessage);
 routes.post('/admin/clear-messages', UserController.adminClearGlobalMessages);
 routes.get('/admin/message-stats', UserController.adminGetMessageStats);
+<<<<<<< HEAD
 
+=======
+routes.get('/admin/verifications', UserController.adminListVerifications);
+routes.get('/admin/message-stats', UserController.adminGetStats);
+>>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)
 // ===============================
 // SLUG (SEMPRE POR ÚLTIMO)
 // ===============================

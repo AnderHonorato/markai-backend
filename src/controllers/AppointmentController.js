@@ -4,6 +4,7 @@ const prisma = new PrismaClient();
 const { sendPushNotification } = require('../services/notificationService');
 const { enviarMensagem } = require('../bot'); 
 const { addMinutes, parseISO, isBefore, format } = require('date-fns');
+const { calcularHorariosLivres } = require('../utils/date.util');
 
 // --- NOVA FORMATAÇÃO DE ID (MARKAI-00000-00001) ---
 const formatDisplayId = (seqId) => {
@@ -349,5 +350,44 @@ module.exports = {
       
       return res.json({ success: true });
     } catch (error) { return res.status(500).json({ error: 'Erro no check-in' }); }
+  },
+
+  // 10. Obter Horários Disponíveis
+  async getAvailableSlots(req, res) {
+    const { proId } = req.params;
+    const { date } = req.query; // Espera uma string de data (ex: 2026-01-20)
+
+    if (!proId || !date) {
+      return res.status(400).json({ error: 'ID do profissional e data são obrigatórios.' });
+    }
+
+    try {
+      const selectedDate = parseISO(date);
+      const start = new Date(selectedDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(selectedDate);
+      end.setHours(23, 59, 59, 999);
+
+      // Busca dados do profissional para obter horários de trabalho e duração padrão
+      const pro = await prisma.user.findUnique({ where: { id: proId } });
+      if (!pro) return res.status(404).json({ error: 'Profissional não encontrado.' });
+
+      // Busca agendamentos ativos para o dia selecionado
+      const appointments = await prisma.appointment.findMany({
+        where: {
+          proId,
+          date: { gte: start, lte: end },
+          status: { notIn: ['CANCELED', 'CANCELLED', 'NO_SHOW'] }
+        }
+      });
+
+      // Calcula os slots livres usando a lógica centralizada no utilitário
+      const availableSlots = calcularHorariosLivres(selectedDate, appointments, pro);
+
+      return res.json(availableSlots);
+    } catch (error) {
+      console.error("❌ Erro ao buscar slots:", error);
+      return res.status(500).json({ error: 'Erro ao calcular horários disponíveis.' });
+    }
   }
 };

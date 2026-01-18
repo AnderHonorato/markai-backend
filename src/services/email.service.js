@@ -1,5 +1,4 @@
 // backend/src/services/email.service.js
-
 const { Resend } = require('resend');
 
 // API Key configurada

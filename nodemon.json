@@ -1,6 +1,12 @@
 {
-  "ignore": ["auth_sessions/*", "*.log"],
+  "ignore": [
+    "auth_sessions/*",
+    "auth_info_baileys/*",
+    "*.log",
+    "uploads/*"
+  ],
   "env": {
     "NODE_ENV": "development"
-  }
+  },
+  "ext": "js,json"
 }

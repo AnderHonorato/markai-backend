@@ -1,6 +1,13 @@
 // backend/src/utils/date.util.js
 const { startOfDay, setHours, setMinutes, addMinutes, isBefore } = require('date-fns');
 
+/**
+ * Calcula os horários disponíveis de um profissional para uma data específica.
+ * @param {Date} dataEscolhida - O dia para o qual deseja calcular os slots.
+ * @param {Array} agendamentosDoDia - Lista de agendamentos já existentes no banco para este dia.
+ * @param {Object} configProfissional - Objeto contendo workStart, workEnd e serviceDuration.
+ * @returns {Array} - Array de objetos Date representando o início de cada slot livre.
+ */
 function calcularHorariosLivres(dataEscolhida, agendamentosDoDia, configProfissional) {
     const horariosDisponiveis = [];
     
@@ -35,14 +42,13 @@ function calcularHorariosLivres(dataEscolhida, agendamentosDoDia, configProfissi
         // 4. Verifica colisão com agendamentos existentes
         const estaOcupado = agendamentosDoDia.some(appt => {
             // Ignora cancelados ou faltas
-            if (appt.status === 'CANCELED' || appt.status === 'NO_SHOW') return false;
+            if (appt.status === 'CANCELED' || appt.status === 'CANCELLED' || appt.status === 'NO_SHOW') return false;
             
             // Assume que o agendamento já marcado também tem a mesma duração
-            // (Se quiser precisão absoluta, teria que salvar a duração no Appointment)
             const inicioAppt = new Date(appt.date);
             const fimAppt = addMinutes(inicioAppt, duracao);
 
-            // Lógica de Interseção de Horários:
+            // Lógica de Interseção de Horários Corrigida:
             // O Slot colide se começar ANTES do agendamento terminar E terminar DEPOIS do agendamento começar
             return (inicioSlot < fimAppt && fimSlot > inicioAppt);
         });
