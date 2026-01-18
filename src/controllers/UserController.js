@@ -708,11 +708,7 @@ async adminGetStats(req, res) {
           return res.json({ success: true });
       } catch (error) { return res.status(500).json({ error: 'Erro ao limpar.' }); }
   },
-<<<<<<< HEAD
-  async adminSendGlobalMessage(req, res) {
-=======
 async adminSendGlobalMessage(req, res) {
->>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)
     const { requesterId, message, type, targetGroup } = req.body;
 
     if (!requesterId || !message) {
@@ -738,24 +734,6 @@ async adminSendGlobalMessage(req, res) {
 
       const notificationField = type === 'warning' ? 'activeWarning' : 'activeFeedback';
 
-<<<<<<< HEAD
-      await Promise.all(users.map(user => 
-        prisma.user.update({
-          where: { id: user.id },
-          data: { [notificationField]: message }
-        })
-      ));
-
-      await prisma.adminLog.create({
-        data: {
-          action: 'GLOBAL_MESSAGE',
-          details: `Tipo: ${type}, Grupo: ${targetGroup || 'all'}, Msg: "${message.substring(0, 50)}"`,
-          adminId: requesterId,
-          targetId: null
-        }
-      });
-
-=======
       await prisma.user.updateMany({
         where: whereCondition,
         data: { [notificationField]: message }
@@ -784,7 +762,6 @@ async adminSendGlobalMessage(req, res) {
          }
       }
 
->>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)
       return res.json({ success: true, sentTo: users.length });
 
     } catch (error) {
@@ -845,10 +822,6 @@ async adminSendGlobalMessage(req, res) {
       return res.status(500).json({ error: 'Erro ao obter estatísticas.' });
     }
   },
-<<<<<<< HEAD
- 
-};        
-=======
 
   async adminListVerifications(req, res) {
   const { requesterId } = req.query;
@@ -875,4 +848,3 @@ async adminSendGlobalMessage(req, res) {
 },
  
 };        
->>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)

@@ -68,8 +68,6 @@ routes.post('/cash/reopen', CashController.reopen);
 routes.post('/notes', NoteController.saveNote);
 routes.get('/notes', NoteController.getNote);
 
-<<<<<<< HEAD
-=======
 // --- BLOG DO DESENVOLVEDOR ---
 routes.get('/blog/latest', BlogController.getLatest); // ← MOVIDO PARA CIMA
 routes.get('/blog', BlogController.list);
@@ -84,7 +82,6 @@ routes.post('/blog/comment/like', BlogController.toggleLikeComment);
 routes.post('/blog/comment', BlogController.createComment);
 routes.delete('/blog/comment/:id', BlogController.deleteComment);
 
->>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)
 
 // --- ROTAS ADMINISTRATIVAS ---
 routes.get('/admin/users', UserController.adminListUsers);
@@ -104,12 +101,8 @@ routes.post('/users/:id/feedback/dismiss', UserController.dismissFeedback);
 routes.post('/admin/global-message', UserController.adminSendGlobalMessage);
 routes.post('/admin/clear-messages', UserController.adminClearGlobalMessages);
 routes.get('/admin/message-stats', UserController.adminGetMessageStats);
-<<<<<<< HEAD
-
-=======
 routes.get('/admin/verifications', UserController.adminListVerifications);
 routes.get('/admin/message-stats', UserController.adminGetStats);
->>>>>>> 449e95d (Correção: soft delete no blog e rotas reorganizadas)
 // ===============================
 // SLUG (SEMPRE POR ÚLTIMO)
 // ===============================
