@@ -90,12 +90,13 @@ class MultiSessionBot {
         const { version } = await fetchLatestBaileysVersion();
 
         const sock = makeWASocket({
-            version,
             auth: state,
-            printQRInTerminal: false,
-            connectTimeoutMs: 60000,
-            qrTimeout: 60000,
-            logger: this.createLogger()
+            printQRInTerminal: false, // Já que você capturou o aviso de depreciado
+            mobile: false, // Garanta que está false para pairing code
+            browser: ["Markai App", "Chrome", "1.0.0"], // Identificação correta
+            connectTimeoutMs: 60000, // Aumente para 60 segundos por causa do Render
+            defaultQueryTimeoutMs: 0,
+            keepAliveIntervalMs: 10000,
         });
 
         // Listener de credenciais
