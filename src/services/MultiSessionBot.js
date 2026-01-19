@@ -91,12 +91,15 @@ class MultiSessionBot {
 
         const sock = makeWASocket({
             auth: state,
-            printQRInTerminal: false, // Já que você capturou o aviso de depreciado
-            mobile: false, // Garanta que está false para pairing code
-            browser: ["Markai App", "Chrome", "1.0.0"], // Identificação correta
-            connectTimeoutMs: 60000, // Aumente para 60 segundos por causa do Render
+            version,
+            printQRInTerminal: false,
+            mobile: false,
+            browser: ['Ubuntu', 'Chrome', '110.0.5481.178'], // Perfil mais estável
+            connectTimeoutMs: 120000, // Aumentado para o Render
             defaultQueryTimeoutMs: 0,
-            keepAliveIntervalMs: 10000,
+            keepAliveIntervalMs: 30000, // Keep-alive mais longo
+            markOnlineOnConnect: true,
+            logger: this.createLogger(),
         });
 
         // Listener de credenciais
@@ -191,8 +194,11 @@ class MultiSessionBot {
             version,
             auth: state,
             printQRInTerminal: method === 'qr',
-            connectTimeoutMs: 60000,
+            browser: ['Ubuntu', 'Chrome', '110.0.5481.178'],
+            connectTimeoutMs: 120000,
             qrTimeout: 60000,
+            defaultQueryTimeoutMs: 0,
+            keepAliveIntervalMs: 30000,
             logger: this.createLogger()
         });
 
@@ -277,17 +283,23 @@ class MultiSessionBot {
                 }
             });
 
-            if (method === 'code' && phoneNumber) {
+if (method === 'code' && phoneNumber) {
+                // Aumentamos para 10 segundos para o Render estabilizar a conexão
                 setTimeout(async () => {
                     try {
+                        // Solicitamos o código de pareamento
                         const code = await sock.requestPairingCode(phoneNumber);
                         console.log(`[MultiSessionBot] 🔑 Código: ${code}`);
+                        
+                        // Resolvemos a promessa enviando o código para o frontend
+                        clearTimeout(timeout);
                         resolve({ type: 'code', data: code, number: phoneNumber });
                     } catch (error) {
+                        console.error("[MultiSessionBot] Erro ao pedir código:", error);
                         clearTimeout(timeout);
                         reject(new Error('FALHA_CODIGO'));
                     }
-                }, 3000);
+                }, 10000); 
             }
         });
     }
