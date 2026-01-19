@@ -283,17 +283,30 @@ class MultiSessionBot {
                 }
             });
 
-if (method === 'code' && phoneNumber) {
-                // Aumentamos para 10 segundos para o Render estabilizar a conexão
+            if (method === 'code' && phoneNumber) {
+                // Delay de 10s para garantir que o socket deu handshake
                 setTimeout(async () => {
                     try {
-                        // Solicitamos o código de pareamento
-                        const code = await sock.requestPairingCode(phoneNumber);
-                        console.log(`[MultiSessionBot] 🔑 Código: ${code}`);
+                        // 1. Limpa o número: remove +, -, espaços e o 9 extra se necessário
+                        let cleanNumber = phoneNumber.replace(/\D/g, ''); 
                         
-                        // Resolvemos a promessa enviando o código para o frontend
+                        // 2. Se for Brasil (55) e tiver 13 dígitos (com o 9 extra), 
+                        // o WhatsApp as vezes exige 12 dígitos para o pareamento.
+                        if (cleanNumber.startsWith('55') && cleanNumber.length === 13) {
+                            // Tenta remover o 9 que fica na posição [4] (ex: 55 77 9...)
+                            // Isso resolve o erro de "verifique o número informado"
+                            const ddd = cleanNumber.substring(2, 4);
+                            const resto = cleanNumber.substring(5);
+                            cleanNumber = '55' + ddd + resto;
+                        }
+
+                        console.log(`[MultiSessionBot] Solicitando código para: ${cleanNumber}`);
+                        
+                        const code = await sock.requestPairingCode(cleanNumber);
+                        
                         clearTimeout(timeout);
-                        resolve({ type: 'code', data: code, number: phoneNumber });
+                        console.log(`[MultiSessionBot] 🔑 Código Gerado: ${code}`);
+                        resolve({ type: 'code', data: code, number: cleanNumber });
                     } catch (error) {
                         console.error("[MultiSessionBot] Erro ao pedir código:", error);
                         clearTimeout(timeout);
