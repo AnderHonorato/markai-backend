@@ -1,0 +1,22 @@
+# Ignora TODAS as pastas de autenticação do WhatsApp
+auth_sessions/
+auth_sessions/**
+**/auth_sessions/**
+src/auth_sessions/
+src/auth_sessions/**
+
+# Ignora pastas de cache do Baileys
+.baileys_store/
+**/.baileys_store/**
+
+# Ignora node_modules
+node_modules/
+**/node_modules/**
+
+# Ignora logs
+*.log
+logs/
+
+# Ignora arquivos temporários
+*.tmp
+*.temp

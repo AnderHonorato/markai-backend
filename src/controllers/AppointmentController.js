@@ -2,14 +2,74 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { sendPushNotification } = require('../services/notificationService');
-const { enviarMensagem } = require('../bot'); 
+const MultiSessionBot = require('../services/MultiSessionBot');
 const { addMinutes, parseISO, isBefore, format } = require('date-fns');
 const { calcularHorariosLivres } = require('../utils/date.util');
+
+
 
 // --- NOVA FORMATAÇÃO DE ID (MARKAI-00000-00001) ---
 const formatDisplayId = (seqId) => {
     return `MARKAI-${String(seqId).padStart(10, '0').replace(/(\d{5})(\d{5})/, '$1-$2')}`;
 };
+
+/**
+ * ✅ ENVIA MENSAGEM WHATSAPP VIA BOT
+ */
+async function enviarWhatsApp(professionalId, phoneNumber, mensagem) {
+    try {
+        console.log('\n📤 ENVIANDO WHATSAPP');
+
+        const sock = MultiSessionBot.getSocket(professionalId);
+
+        if (!sock) {
+            console.log('❌ Bot NÃO conectado para o profissional:', professionalId);
+            return false;
+        }
+
+        if (!phoneNumber) {
+            console.log('❌ Telefone do cliente inválido');
+            return false;
+        }
+
+        // 🔥 NORMALIZA TELEFONE CORRETAMENTE
+        let numero = phoneNumber.replace(/\D/g, '');
+
+        // Garante código do Brasil
+        if (!numero.startsWith('55')) {
+            numero = '55' + numero;
+          }
+
+        const [check] = await sock.onWhatsApp(numero);
+
+        if (!check || !check.exists) {
+            console.log('❌ Número NÃO possui WhatsApp:', numero);
+            return false;
+        }
+
+        const jid = check.jid;
+
+        const textoLimpo = mensagem
+          .replace(/\r/g, '')
+          .replace(/\n\s+/g, '\n')
+          .trim();
+
+        console.log('📞 JID validado:', jid);
+        console.log('📝 TEXTO FINAL:', textoLimpo);
+
+        await sock.sendMessage(jid, { text: textoLimpo });
+
+
+
+        console.log('✅ WhatsApp enviado com sucesso');
+        return true;
+
+    } catch (error) {
+        console.error('❌ Erro ao enviar WhatsApp:', error);
+        return false;
+    }
+}
+
 
 module.exports = {
   // 1. Criar Agendamento
@@ -140,27 +200,76 @@ module.exports = {
     }
   },
 
-  // 3. Confirmar
+  // 3. Confirmar ✅ CORRIGIDO
   async confirm(req, res) {
     const { id } = req.params;
+
     try {
-      const appt = await prisma.appointment.update({
+      // 🔎 1. BUSCA O AGENDAMENTO (SEM CONFIRMAR)
+      const appt = await prisma.appointment.findUnique({
+        where: { id },
+        include: { client: true, professional: true }
+      });
+
+      if (!appt) {
+        return res.status(404).json({ error: 'Agendamento não encontrado' });
+      }
+
+      // ⚠️ 2. VERIFICA AGENDAMENTO DUPLICADO
+      const existing = await prisma.appointment.findFirst({
+        where: {
+          clientId: appt.clientId,
+          proId: appt.proId,
+          status: { in: ['PENDING', 'CONFIRMED'] },
+          id: { not: id }
+        }
+      });
+
+      if (existing) {
+        const dataExistente = format(
+          new Date(existing.date),
+          "dd/MM/yyyy 'às' HH:mm"
+        );
+
+        const aviso = `⚠️ *ATENÇÃO*\n\nVocê já possui um agendamento ativo com este profissional:\n\n📅 ${dataExistente}\n📋 ${existing.serviceList}\n\nSe precisar alterar, cancele o anterior 😉`;
+
+        await enviarWhatsApp(appt.proId, appt.client.phone, aviso);
+      }
+
+      // ✅ 3. AGORA CONFIRMA
+      const confirmed = await prisma.appointment.update({
         where: { id },
         data: { status: 'CONFIRMED', proConfirmed: true },
         include: { client: true, professional: true }
       });
 
-      try {
-        const dataFormatada = format(new Date(appt.date), "HH:mm");
-        await enviarMensagem(appt.client.phone, `✅ *Confirmado!*\nOlá ${appt.client.name}, seu horário na *${appt.professional.companyName || appt.professional.name}* às *${dataFormatada}* foi aceito.`);
-      } catch (e) { console.log("Erro ao enviar whats:", e); }
 
+      // ✅ ENVIA WHATSAPP COM TELEFONE DO CLIENTE
+      try {
+        console.log('\n🔔 CONFIRMAÇÃO DE AGENDAMENTO');
+        console.log('Cliente:', appt.client.name);
+        console.log('Telefone do cliente:', appt.client.phone);
+        
+        const dataFormatada = format(new Date(appt.date), "dd/MM/yyyy 'às' HH:mm");
+        const mensagem = `🎉 *CONFIRMADO!*\n\n✅ ${appt.professional.companyName || appt.professional.name} aceitou!\n\n📅 ${dataFormatada}\n📋 ${appt.serviceList}\n\nTe avisaremos quando estiver próximo! ⏰`;
+        
+        // Usa o telefone do CLIENTE (não do agendamento)
+        await enviarWhatsApp(appt.proId, appt.client.phone, mensagem);
+        
+      } catch (e) { 
+        console.log("❌ Erro ao enviar WhatsApp:", e.message); 
+      }
+
+      // Push notification
       if (appt.client.pushToken) {
           await sendPushNotification(appt.client.pushToken, "Confirmado! ✅", "O profissional aceitou seu agendamento.");
       }
 
       return res.json(appt);
-    } catch (error) { return res.status(500).json({ error: 'Erro ao confirmar' }); }
+    } catch (error) { 
+      console.error('Erro ao confirmar:', error);
+      return res.status(500).json({ error: 'Erro ao confirmar' }); 
+    }
   },
 
   // 4. Propor Novo Horário
@@ -215,34 +324,36 @@ module.exports = {
       }
 
       return res.json(appt);
-    } catch (error) { return res.status(500).json({ error: 'Erro ao propor horário' }); }
+    } catch (error) { 
+      console.error('Erro ao propor:', error);
+      return res.status(500).json({ error: 'Erro ao propor horário' }); 
+    }
   },
 
-  // 5. Responder Proposta (COM REGISTRO DE HISTÓRICO)
+  // 5. Responder Proposta
   async respond(req, res) {
     const { id } = req.params;
     const { accept } = req.body;
     try {
       const current = await prisma.appointment.findUnique({ where: { id } });
       
-      // Cria a mensagem de histórico para salvar no banco
       const historyLog = accept ? "Negociação Aceita" : "Negociação Recusada";
 
       let data = {};
       if (accept) {
         data = {
-          date: current.rescheduleDate, // Atualiza a data oficial
+          date: current.rescheduleDate,
           status: 'CONFIRMED',
           rescheduleDate: null, 
           rescheduleBy: null,
-          rescheduleReason: historyLog // Salva o histórico aqui em vez de null
+          rescheduleReason: historyLog
         };
       } else {
         data = {
           status: 'CONFIRMED', 
           rescheduleDate: null, 
           rescheduleBy: null,
-          rescheduleReason: historyLog // Salva o histórico
+          rescheduleReason: historyLog
         };
       }
 
@@ -259,7 +370,10 @@ module.exports = {
       }
 
       return res.json(appt);
-    } catch (error) { return res.status(500).json({ error: 'Erro ao responder' }); }
+    } catch (error) { 
+      console.error('Erro ao responder:', error);
+      return res.status(500).json({ error: 'Erro ao responder' }); 
+    }
   },
 
   // 6. Finalizar
@@ -275,7 +389,7 @@ module.exports = {
               status,
               isFinishedEarly: isEarly || false 
           }, 
-          include: { client: true } 
+          include: { client: true, professional: true }
       });
 
       if (attended) {
@@ -291,7 +405,10 @@ module.exports = {
       }
 
       return res.json(appointment);
-    } catch (error) { return res.status(500).json({ error: 'Erro ao finalizar' }); }
+    } catch (error) { 
+      console.error('Erro ao finalizar:', error);
+      return res.status(500).json({ error: 'Erro ao finalizar' }); 
+    }
   },
 
   // 7. Cancelar
@@ -316,7 +433,10 @@ module.exports = {
       }
 
       return res.json(appt);
-    } catch (error) { return res.status(500).json({ error: 'Erro cancelar' }); }
+    } catch (error) { 
+      console.error('Erro ao cancelar:', error);
+      return res.status(500).json({ error: 'Erro cancelar' }); 
+    }
   },
 
   // 8. Atualizar Status
@@ -328,15 +448,20 @@ module.exports = {
         where: { id }, data: { status }, include: { client: true, professional: true }
       });
       return res.json(appt);
-    } catch (error) { return res.status(500).json({ error: 'Erro status' }); }
+    } catch (error) { 
+      console.error('Erro ao atualizar status:', error);
+      return res.status(500).json({ error: 'Erro status' }); 
+    }
   },
 
   // 9. Check-in
   async qrCheckIn(req, res) {
     const { clientId, proId } = req.body;
     try {
-      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(); endOfDay.setHours(23, 59, 59, 999);
+      const startOfDay = new Date(); 
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(); 
+      endOfDay.setHours(23, 59, 59, 999);
       
       const appointment = await prisma.appointment.findFirst({
         where: { clientId, proId, status: 'CONFIRMED', date: { gte: startOfDay, lte: endOfDay } },
@@ -349,13 +474,16 @@ module.exports = {
       await prisma.user.update({ where: { id: clientId }, data: { totalAppointments: { increment: 1 } } });
       
       return res.json({ success: true });
-    } catch (error) { return res.status(500).json({ error: 'Erro no check-in' }); }
+    } catch (error) { 
+      console.error('Erro no check-in:', error);
+      return res.status(500).json({ error: 'Erro no check-in' }); 
+    }
   },
 
   // 10. Obter Horários Disponíveis
   async getAvailableSlots(req, res) {
     const { proId } = req.params;
-    const { date } = req.query; // Espera uma string de data (ex: 2026-01-20)
+    const { date } = req.query;
 
     if (!proId || !date) {
       return res.status(400).json({ error: 'ID do profissional e data são obrigatórios.' });
@@ -368,11 +496,9 @@ module.exports = {
       const end = new Date(selectedDate);
       end.setHours(23, 59, 59, 999);
 
-      // Busca dados do profissional para obter horários de trabalho e duração padrão
       const pro = await prisma.user.findUnique({ where: { id: proId } });
       if (!pro) return res.status(404).json({ error: 'Profissional não encontrado.' });
 
-      // Busca agendamentos ativos para o dia selecionado
       const appointments = await prisma.appointment.findMany({
         where: {
           proId,
@@ -381,7 +507,6 @@ module.exports = {
         }
       });
 
-      // Calcula os slots livres usando a lógica centralizada no utilitário
       const availableSlots = calcularHorariosLivres(selectedDate, appointments, pro);
 
       return res.json(availableSlots);

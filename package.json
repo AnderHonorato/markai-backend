@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon src/server.js --ignore auth_info_baileys/",
-    "start": "nodemon --ignore auth_sessions/ src/server.js"
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "dev:stable": "node --watch src/server.js",
+    "whatsapp:test": "NODE_ENV=production node src/server.js"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +21,7 @@
     "cors": "^2.8.5",
     "date-fns": "^4.1.0",
     "express": "^5.2.1",
+    "node-cache": "^5.1.2",
     "nodemailer": "^7.0.12",
     "pino": "^10.1.1",
     "qrcode-terminal": "^0.12.0",

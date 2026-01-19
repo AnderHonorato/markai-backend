@@ -29,14 +29,15 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
     console.log(`🚀 Servidor V5 rodando na porta ${PORT}`);
+    console.log(`📱 WhatsApp Bot: Use a tela de configuração no app para conectar`);
     
-    // Inicia o Bot com proteção para não travar o cadastro se o WhatsApp falhar
-    setTimeout(() => {
-        try {
-            console.log('🤖 Tentando iniciar Bot do WhatsApp...');
-            startBot();
-        } catch (error) {
-            console.error('⚠️ O Bot falhou ao iniciar, mas o sistema de cadastro segue ativo.');
-        }
-    }, 5000); // Aguarda 5 segundos para o servidor estabilizar antes de ligar o bot
+    // COMENTADO: O bot agora é iniciado manualmente via /whatsapp/connect
+    // setTimeout(() => {
+    //     try {
+    //         console.log('🤖 Tentando iniciar Bot do WhatsApp...');
+    //         startBot("ID_DO_PROFISSIONAL_PADRAO"); 
+    //     } catch (error) {
+    //         console.error('⚠️ O Bot falhou ao iniciar.');
+    //     }
+    // }, 5000);
 });

@@ -1,12 +1,17 @@
 {
+  "watch": ["src"],
+  "ext": "js,json",
   "ignore": [
-    "auth_sessions/*",
-    "auth_info_baileys/*",
-    "*.log",
-    "uploads/*"
+    "src/auth_sessions/**",
+    "auth_sessions/**",
+    "**/auth_sessions/**",
+    "**/node_modules/**",
+    "**/.wwebjs_auth/**",
+    "**/.wwebjs_cache/**"
   ],
+  "delay": "3000",
   "env": {
     "NODE_ENV": "development"
   },
-  "ext": "js,json"
+  "verbose": false
 }
