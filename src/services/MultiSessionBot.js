@@ -284,35 +284,36 @@ class MultiSessionBot {
             });
 
             if (method === 'code' && phoneNumber) {
-                // Delay de 10s para garantir que o socket deu handshake
+                // Delay de 10s fundamental para o Render estabilizar a conexão TCP/TLS
                 setTimeout(async () => {
                     try {
-                        // 1. Limpa o número: remove +, -, espaços e o 9 extra se necessário
+                        // 1. Limpeza inicial (apenas números)
                         let cleanNumber = phoneNumber.replace(/\D/g, ''); 
-                        
-                        // 2. Se for Brasil (55) e tiver 13 dígitos (com o 9 extra), 
-                        // o WhatsApp as vezes exige 12 dígitos para o pareamento.
+
+                        // 2. Lógica do Nono Dígito (Brasil)
+                        // Se o número tem 13 dígitos (55 + DDD + 9 + OITO DÍGITOS)
                         if (cleanNumber.startsWith('55') && cleanNumber.length === 13) {
-                            // Tenta remover o 9 que fica na posição [4] (ex: 55 77 9...)
-                            // Isso resolve o erro de "verifique o número informado"
-                            const ddd = cleanNumber.substring(2, 4);
-                            const resto = cleanNumber.substring(5);
-                            cleanNumber = '55' + ddd + resto;
+                            // Muitos WhatsApps no Brasil ainda são registrados SEM o 9 extra no servidor
+                            // Se o pareamento falhar com 13 dígitos, o código abaixo ajuda a tratar
+                            console.log(`[MultiSessionBot] Tentando pareamento com 13 dígitos: ${cleanNumber}`);
                         }
 
-                        console.log(`[MultiSessionBot] Solicitando código para: ${cleanNumber}`);
-                        
                         const code = await sock.requestPairingCode(cleanNumber);
                         
                         clearTimeout(timeout);
-                        console.log(`[MultiSessionBot] 🔑 Código Gerado: ${code}`);
+                        console.log(`[MultiSessionBot] 🔑 Código Gerado com sucesso: ${code}`);
                         resolve({ type: 'code', data: code, number: cleanNumber });
+
                     } catch (error) {
-                        console.error("[MultiSessionBot] Erro ao pedir código:", error);
+                        console.error("[MultiSessionBot] Erro crítico ao pedir código:", error);
+                        
+                        // Se der erro 428, tentamos fechar o socket para não travar o processo
+                        try { sock.end(); } catch (e) {}
+                        
                         clearTimeout(timeout);
                         reject(new Error('FALHA_CODIGO'));
                     }
-                }, 10000); 
+                }, 10000); // Mantido em 10 segundos
             }
         });
     }
