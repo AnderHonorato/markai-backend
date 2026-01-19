@@ -1,442 +1,358 @@
 // backend/src/services/MultiSessionBot.js
 const makeWASocket = require('@whiskeysockets/baileys').default;
-const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const { Boom } = require('@hapi/boom');
-const path = require('path');
+const { 
+    DisconnectReason, 
+    useMultiFileAuthState,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore
+} = require('@whiskeysockets/baileys');
+const pino = require('pino');
 const fs = require('fs');
-const { handleIncomingMessage } = require('../bot');
-
-const BASE_AUTH_DIR = path.join(__dirname, '../../auth_sessions');
-
-if (!fs.existsSync(BASE_AUTH_DIR)) {
-    fs.mkdirSync(BASE_AUTH_DIR, { recursive: true });
-}
+const path = require('path');
 
 class MultiSessionBot {
     constructor() {
-        this.sessions = new Map();
-        this.pendingConnections = new Map();
-        this.error515Tracker = new Map();
+        this.sessions = new Map(); // userId -> socket
+        this.sessionStates = new Map(); // userId -> { qr, code, number, state }
+        this.authDir = path.join(__dirname, '../../auth_sessions');
         
-        // ✅ RESTAURA SESSÕES AO INICIAR
-        this.restaurarSessoes();
-    }
-
-    /**
-     * ✅ CRIA LOGGER COMPATÍVEL COM BAILEYS
-     */
-    createLogger() {
-        const logger = {
-            level: 'silent',
-            fatal: () => {},
-            error: () => {},
-            warn: () => {},
-            info: () => {},
-            debug: () => {},
-            trace: () => {},
-            child: () => logger
-        };
-        return logger;
-    }
-
-    /**
-     * ✅ RESTAURA TODAS AS SESSÕES SALVAS
-     */
-    async restaurarSessoes() {
-        console.log('\n🔄 RESTAURANDO SESSÕES SALVAS...\n');
-        
-        try {
-            if (!fs.existsSync(BASE_AUTH_DIR)) {
-                console.log('📁 Nenhuma sessão para restaurar');
-                return;
-            }
-
-            const pastas = fs.readdirSync(BASE_AUTH_DIR);
-            console.log(`📂 Encontradas ${pastas.length} sessões`);
-
-            for (const pasta of pastas) {
-                const sessionId = pasta; // Mantém "session_UUID"
-                const authPath = path.join(BASE_AUTH_DIR, pasta);
-                
-                // Verifica se tem arquivo creds.json (sessão válida)
-                const credsPath = path.join(authPath, 'creds.json');
-                if (!fs.existsSync(credsPath)) {
-                    console.log(`⏭️  Sessão ${sessionId} sem creds, pulando`);
-                    continue;
-                }
-
-                try {
-                    console.log(`🔌 Conectando sessão: ${sessionId}`);
-                    await this.reconectarSessao(sessionId, authPath);
-                    
-                    // Aguarda 2 segundos entre conexões
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                } catch (error) {
-                    console.error(`❌ Erro ao restaurar ${sessionId}:`, error.message);
-                }
-            }
-
-            console.log(`\n✅ RESTAURAÇÃO COMPLETA: ${this.sessions.size} sessões ativas\n`);
-        } catch (error) {
-            console.error('❌ Erro na restauração:', error);
+        // Cria diretório de autenticação
+        if (!fs.existsSync(this.authDir)) {
+            fs.mkdirSync(this.authDir, { recursive: true });
         }
+        
+        console.log('📱 MultiSessionBot inicializado');
+        console.log('📂 Diretório auth:', this.authDir);
     }
 
     /**
-     * ✅ RECONECTA UMA SESSÃO SALVA
+     * ✅ INICIA NOVA SESSÃO
      */
-    async reconectarSessao(sessionId, authPath) {
-        const { state, saveCreds } = await useMultiFileAuthState(authPath);
-        const { version } = await fetchLatestBaileysVersion();
-
-        const sock = makeWASocket({
-            auth: state,
-            version,
-            printQRInTerminal: false,
-            mobile: false,
-            browser: ['Ubuntu', 'Chrome', '110.0.5481.178'], // Perfil mais estável
-            connectTimeoutMs: 120000, // Aumentado para o Render
-            defaultQueryTimeoutMs: 0,
-            keepAliveIntervalMs: 30000, // Keep-alive mais longo
-            markOnlineOnConnect: true,
-            logger: this.createLogger(),
-        });
-
-        // Listener de credenciais
-        sock.ev.on('creds.update', saveCreds);
-
-        // Listener de conexão
-        sock.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update;
-
-            if (connection === 'close') {
-                const shouldReconnect = (lastDisconnect?.error instanceof Boom) && 
-                    lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut;
-
-                if (shouldReconnect) {
-                    console.log(`🔄 Reconectando ${sessionId}...`);
-                    setTimeout(() => this.reconectarSessao(sessionId, authPath), 3000);
-                } else {
-                    console.log(`🚪 Sessão ${sessionId} desconectada permanentemente`);
-                    this.sessions.delete(sessionId);
-                }
-            }
-
-            if (connection === 'open') {
-                console.log(`✅ Sessão ${sessionId} restaurada!`);
-                this.sessions.set(sessionId, sock);
-            }
-        });
-
-        // ✅ EXTRAI UUID LIMPO PARA PASSAR AO BOT
-        const cleanUserId = sessionId.startsWith('session_') ? sessionId.replace('session_', '') : sessionId;
-        
-        // Listener de mensagens
-        sock.ev.on('messages.upsert', async ({ messages }) => {
-            for (const msg of messages) {
-                await handleIncomingMessage(msg, cleanUserId, sock);
-            }
-        });
-
-        return sock;
-    }
-
     async startSession(userId, method = 'qr', phoneNumber = null) {
         console.log(`\n${'='.repeat(50)}`);
-        console.log(`[MultiSessionBot] Nova conexão`);
-        console.log(`User: ${userId}`);
-        console.log(`Método: ${method}`);
-        console.log(`Tel: ${phoneNumber || 'N/A'}`);
-        console.log(`${'='.repeat(50)}\n`);
+        console.log('[MultiSessionBot] Nova conexão');
+        console.log('User:', userId);
+        console.log('Método:', method);
+        console.log('Tel:', phoneNumber || 'N/A');
+        console.log('='.repeat(50));
 
-        // Remove prefixo "session_" se existir para ter o UUID limpo
-        const cleanUserId = userId.startsWith('session_') ? userId.replace('session_', '') : userId;
-        const sessionId = `session_${cleanUserId}`;
+        // Limpa sessão existente
+        if (this.sessions.has(userId)) {
+            console.log('[MultiSessionBot] ⚠️ Sessão existente detectada. Limpando...');
+            await this.disconnectSession(userId);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+
+        const sessionDir = path.join(this.authDir, `session_${userId}`);
         
-        console.log(`[MultiSessionBot] UUID limpo: ${cleanUserId}`);
-        console.log(`[MultiSessionBot] SessionId: ${sessionId}`);
+        // Remove arquivos antigos de sessão
+        if (fs.existsSync(sessionDir)) {
+            console.log('[MultiSessionBot] 🗑️ Removendo sessão antiga...');
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
 
-        if (this.sessions.has(sessionId)) {
-            const sock = this.sessions.get(sessionId);
+        return new Promise(async (resolve, reject) => {
             try {
-                const number = sock.user?.id?.split(':')[0];
-                console.log(`[MultiSessionBot] ✅ Já conectado: ${number}`);
-                return { type: 'connected', message: 'Já conectado', number };
-            } catch (e) {
-                console.log(`[MultiSessionBot] ⚠️ Sessão inválida, limpando...`);
-                this.sessions.delete(sessionId);
-            }
-        }
+                // Cria diretório da sessão
+                fs.mkdirSync(sessionDir, { recursive: true });
 
-        // Verifica erro 515 persistente
-        const error515Count = this.error515Tracker.get(sessionId) || 0;
-        if (error515Count >= 3) {
-            const lastError = this.error515Tracker.get(`${sessionId}_lastError`) || Date.now();
-            const tempoDecorrido = Date.now() - lastError;
-            
-            if (tempoDecorrido < 120000) { // 2 minutos
-                throw new Error('BLOQUEIO_TEMPORARIO');
-            } else {
-                this.error515Tracker.delete(sessionId);
-                this.error515Tracker.delete(`${sessionId}_lastError`);
-            }
-        }
+                // Carrega versão do Baileys
+                const { version } = await fetchLatestBaileysVersion();
+                console.log('[MultiSessionBot] 📦 Baileys versão:', version.join('.'));
 
-        const authPath = path.join(BASE_AUTH_DIR, sessionId);
-        if (!fs.existsSync(authPath)) {
-            fs.mkdirSync(authPath, { recursive: true });
-        }
+                // Carrega autenticação
+                const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
-        const { state, saveCreds } = await useMultiFileAuthState(authPath);
-        const { version } = await fetchLatestBaileysVersion();
+                // Configuração do socket
+                const sock = makeWASocket({
+                    version,
+                    auth: {
+                        creds: state.creds,
+                        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+                    },
+                    logger: pino({ level: 'silent' }),
+                    printQRInTerminal: false, // NÃO imprimir no terminal
+                    browser: ['Markaí Bot', 'Chrome', '1.0.0'],
+                    generateHighQualityLinkPreview: true,
+                    markOnlineOnConnect: true,
+                    syncFullHistory: false,
+                    getMessage: async () => ({ conversation: '' })
+                });
 
-        const sock = makeWASocket({
-            version,
-            auth: state,
-            printQRInTerminal: method === 'qr',
-            browser: ['Ubuntu', 'Chrome', '110.0.5481.178'],
-            connectTimeoutMs: 120000,
-            qrTimeout: 60000,
-            defaultQueryTimeoutMs: 0,
-            keepAliveIntervalMs: 30000,
-            logger: this.createLogger()
-        });
+                // Estado inicial
+                this.sessionStates.set(userId, {
+                    qr: null,
+                    code: null,
+                    number: null,
+                    state: 'connecting'
+                });
 
-        return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                sock.end();
-                this.pendingConnections.delete(sessionId);
-                reject(new Error('TIMEOUT'));
-            }, 60000);
+                let connectionTimeout;
+                let resolved = false;
 
-            sock.ev.on('creds.update', saveCreds);
+                // ⏱️ TIMEOUT DE 60 SEGUNDOS
+                connectionTimeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        console.log('[MultiSessionBot] ⏰ Timeout de conexão');
+                        this.cleanupSession(userId, sock);
+                        reject(new Error('TIMEOUT'));
+                    }
+                }, 60000);
 
-            sock.ev.on('connection.update', async (update) => {
-                const { connection, lastDisconnect, qr } = update;
+                // 🔥 EVENTO: Atualização de Conexão
+                sock.ev.on('connection.update', async (update) => {
+                    const { connection, lastDisconnect, qr } = update;
+                    
+                    console.log('[MultiSessionBot] 🔄 Update:', { 
+                        connection, 
+                        qr: qr ? 'QR GERADO' : 'SEM QR',
+                        reason: lastDisconnect?.error?.output?.statusCode 
+                    });
 
-                console.log(`[MultiSessionBot] Status: ${connection}`);
+                    // ✅ QR CODE GERADO
+                    if (qr && method === 'qr') {
+                        console.log('[MultiSessionBot] 📱 QR Code gerado');
+                        this.sessionStates.set(userId, {
+                            ...this.sessionStates.get(userId),
+                            qr,
+                            state: 'qr_ready'
+                        });
 
-                if (qr && method === 'qr' && !this.pendingConnections.has(sessionId)) {
-                    this.pendingConnections.set(sessionId, true);
-                    console.log('[MultiSessionBot] 📱 QR Code gerado');
-                    resolve({ type: 'qr', data: qr });
-                }
-
-                if (connection === 'close') {
-                    clearTimeout(timeout);
-                    const statusCode = (lastDisconnect?.error instanceof Boom) 
-                        ? lastDisconnect.error.output.statusCode 
-                        : 500;
-
-                    console.log(`[MultiSessionBot] ❌ Desconectado: ${statusCode}`);
-
-                    // Tratamento erro 515
-                    if (statusCode === 515) {
-                        const currentCount = (this.error515Tracker.get(sessionId) || 0) + 1;
-                        this.error515Tracker.set(sessionId, currentCount);
-                        this.error515Tracker.set(`${sessionId}_lastError`, Date.now());
-                        
-                        console.log(`[MultiSessionBot] ⚠️ ERRO 515 (tentativa ${currentCount}/3)`);
-                        
-                        this.limparSessao(sessionId);
-                        this.sessions.delete(sessionId);
-                        this.pendingConnections.delete(sessionId);
-                        
-                        reject(new Error(`ERRO_515_PERSISTENTE_${currentCount}`));
-                        return;
+                        if (!resolved) {
+                            resolved = true;
+                            clearTimeout(connectionTimeout);
+                            this.sessions.set(userId, sock);
+                            resolve({ type: 'qr', data: qr });
+                        }
                     }
 
-                    this.sessions.delete(sessionId);
-                    this.pendingConnections.delete(sessionId);
+                    // ✅ CONECTADO
+                    if (connection === 'open') {
+                        console.log('[MultiSessionBot] ✅ CONECTADO!');
+                        clearTimeout(connectionTimeout);
+                        
+                        // Pega número conectado
+                        const number = sock.user?.id?.split(':')[0] || phoneNumber?.replace(/\D/g, '');
+                        
+                        this.sessionStates.set(userId, {
+                            qr: null,
+                            code: null,
+                            number,
+                            state: 'active'
+                        });
 
-                    if (statusCode === DisconnectReason.loggedOut) {
-                        this.limparSessao(sessionId);
-                        reject(new Error('LOGOUT'));
-                    } else if (statusCode === 401) {
-                        reject(new Error('CODIGO_EXPIRADO'));
-                    } else {
-                        reject(new Error(`DISCONNECT_${statusCode}`));
+                        this.sessions.set(userId, sock);
+
+                        if (!resolved) {
+                            resolved = true;
+                            resolve({ type: 'connected', number });
+                        }
                     }
-                }
 
-                if (connection === 'open') {
-                    clearTimeout(timeout);
-                    
-                    // Limpa contador de erro 515
-                    this.error515Tracker.delete(sessionId);
-                    this.error515Tracker.delete(`${sessionId}_lastError`);
-                    
-                    const number = sock.user.id.split(':')[0];
-                    console.log(`[MultiSessionBot] ✅ CONECTADO: ${number}`);
-                    
-                    this.sessions.set(sessionId, sock);
-                    this.pendingConnections.delete(sessionId);
-                    
-                    resolve({ type: 'connected', message: 'Sucesso', number });
-                }
-            });
+                    // ❌ DESCONECTADO
+                    if (connection === 'close') {
+                        clearTimeout(connectionTimeout);
+                        const statusCode = lastDisconnect?.error?.output?.statusCode;
+                        
+                        console.log('[MultiSessionBot] ❌ Desconectado:', statusCode);
 
-            // ✅ PASSA cleanUserId (UUID puro) para o bot
-            sock.ev.on('messages.upsert', async ({ messages }) => {
-                for (const msg of messages) {
-                    await handleIncomingMessage(msg, cleanUserId, sock);
-                }
-            });
-
-                if (method === 'code' && phoneNumber) {
-                // Delay de 10s para estabilizar o socket no Render
-                setTimeout(async () => {
-                    try {
-                        let cleanNumber = phoneNumber.replace(/\D/g, '');
-                        let code = null;
-
-                        console.log(`[MultiSessionBot] 🛠️ Iniciando tentativas para: ${cleanNumber}`);
-
-                        // FUNÇÃO INTERNA PARA TENTAR O CÓDIGO
-                        const tryRequest = async (num) => {
-                            console.log(`[MultiSessionBot] 📲 Tentando código para: ${num}`);
-                            return await sock.requestPairingCode(num);
-                        };
-
-                        try {
-                            // TENTATIVA 1: Número como veio (Limpando apenas caracteres)
-                            code = await tryRequest(cleanNumber);
-                        } catch (err) {
-                            console.log(`[MultiSessionBot] ⚠️ Falha na 1ª tentativa. Erro: ${err.message}`);
-
-                            // TENTATIVA 2: Se for Brasil e tiver 13 dígitos, tenta REMOVER o 9º dígito
-                            if (cleanNumber.startsWith('55') && cleanNumber.length === 13) {
-                                const ddd = cleanNumber.substring(2, 4);
-                                const resto = cleanNumber.substring(5);
-                                const semNono = '55' + ddd + resto;
-                                console.log(`[MultiSessionBot] 🔄 Tentando sem o 9º dígito: ${semNono}`);
-                                code = await tryRequest(semNono);
-                                cleanNumber = semNono; // Atualiza para o sucesso
-                            } else if (cleanNumber.startsWith('55') && cleanNumber.length === 12) {
-                                // TENTATIVA 3: Se tiver 12 dígitos, tenta ADICIONAR o 9º dígito (raro, mas acontece)
-                                const ddd = cleanNumber.substring(2, 4);
-                                const resto = cleanNumber.substring(4);
-                                const comNono = '55' + ddd + '9' + resto;
-                                console.log(`[MultiSessionBot] 🔄 Tentando com o 9º dígito: ${comNono}`);
-                                code = await tryRequest(comNono);
-                                cleanNumber = comNono;
-                            } else {
-                                throw err; // Se não for caso de 9º dígito, repassa o erro
+                        // Erro 515 - Outro dispositivo conectado
+                        if (statusCode === 515) {
+                            this.cleanupSession(userId, sock);
+                            if (!resolved) {
+                                resolved = true;
+                                reject(new Error('ERRO_515_OUTRO_DISPOSITIVO'));
                             }
+                            return;
                         }
 
-                        if (code) {
-                            clearTimeout(timeout);
-                            console.log(`[MultiSessionBot] ✅ SUCESSO! Código: ${code} para ${cleanNumber}`);
+                        // Erro 401 - Logout/Sessão inválida
+                        if (statusCode === 401 || statusCode === 440) {
+                            this.cleanupSession(userId, sock);
+                            if (!resolved) {
+                                resolved = true;
+                                reject(new Error('LOGOUT'));
+                            }
+                            return;
+                        }
+
+                        // Outros erros
+                        this.cleanupSession(userId, sock);
+                        if (!resolved) {
+                            resolved = true;
+                            reject(new Error('DESCONECTADO'));
+                        }
+                    }
+                });
+
+                // 💾 Salva credenciais
+                sock.ev.on('creds.update', saveCreds);
+
+                // 🔐 MÉTODO: CÓDIGO DE PAREAMENTO
+                if (method === 'code' && phoneNumber) {
+                    console.log('[MultiSessionBot] 📲 Solicitando código para:', phoneNumber);
+                    
+                    // Aguarda socket estar pronto
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+
+                    try {
+                        const cleanNumber = phoneNumber.replace(/\D/g, '');
+                        const code = await sock.requestPairingCode(cleanNumber);
+                        
+                        console.log('[MultiSessionBot] ✅ Código gerado:', code);
+
+                        this.sessionStates.set(userId, {
+                            ...this.sessionStates.get(userId),
+                            code,
+                            state: 'code_ready'
+                        });
+
+                        this.sessions.set(userId, sock);
+
+                        if (!resolved) {
+                            resolved = true;
+                            clearTimeout(connectionTimeout);
                             resolve({ type: 'code', data: code, number: cleanNumber });
                         }
-
                     } catch (error) {
-                        console.error("[MultiSessionBot] ❌ Todas as tentativas falharam:", error.message);
-                        
-                        // Tratamento específico para erro de conexão fechada (428)
-                        if (error.message.includes('Closed') || error.message.includes('428')) {
-                            console.log("[MultiSessionBot] 💡 Dica: O Render cortou a conexão. Tente novamente em instantes.");
+                        console.error('[MultiSessionBot] ❌ Erro ao gerar código:', error);
+                        this.cleanupSession(userId, sock);
+                        if (!resolved) {
+                            resolved = true;
+                            clearTimeout(connectionTimeout);
+                            reject(new Error('ERRO_CODIGO'));
                         }
-
-                        clearTimeout(timeout);
-                        try { sock.end(); } catch (e) {}
-                        reject(new Error('FALHA_CODIGO'));
                     }
-                }, 10000); 
+                }
+
+            } catch (error) {
+                console.error('[MultiSessionBot] 💥 Erro fatal:', error);
+                this.cleanupSession(userId);
+                reject(error);
             }
         });
     }
 
+    /**
+     * ✅ DESCONECTA SESSÃO
+     */
     async disconnectSession(userId) {
-        // Normaliza para sessionId
-        const sessionId = userId.startsWith('session_') ? userId : `session_${userId}`;
+        console.log(`[MultiSessionBot] 🔌 Desconectando: ${userId}`);
         
-        const sock = this.sessions.get(sessionId);
+        const sock = this.sessions.get(userId);
+        
         if (sock) {
             try {
                 await sock.logout();
-            } catch (e) {}
-            sock.end();
-            this.sessions.delete(sessionId);
-            this.limparSessao(sessionId);
-            return true;
-        }
-        return false;
-    }
-
-    getStatus(userId) {
-        // Normaliza para sessionId
-        const sessionId = userId.startsWith('session_') ? userId : `session_${userId}`;
-        
-        const sock = this.sessions.get(sessionId);
-        if (sock) {
-            try {
-                const number = sock.user?.id?.split(':')[0];
-                return { 
-                    connected: true, 
-                    state: 'active',
-                    number 
-                };
             } catch (e) {
-                return { connected: false, state: 'disconnected', number: null };
+                try {
+                    sock.end();
+                } catch (e2) {}
             }
         }
-        return { connected: false, state: 'disconnected', number: null };
+
+        this.cleanupSession(userId, sock);
+        return true;
     }
 
     /**
-     * ✅ RETORNA O SOCKET PARA ENVIAR MENSAGENS
+     * 🗑️ LIMPA SESSÃO
+     */
+    cleanupSession(userId, sock = null) {
+        console.log(`[MultiSessionBot] 🗑️ Limpando sessão: ${userId}`);
+
+        // Remove do mapa
+        this.sessions.delete(userId);
+        this.sessionStates.delete(userId);
+
+        // Encerra socket
+        if (sock) {
+            try {
+                sock.end();
+            } catch (e) {}
+        }
+
+        // Remove arquivos
+        const sessionDir = path.join(this.authDir, `session_${userId}`);
+        if (fs.existsSync(sessionDir)) {
+            try {
+                fs.rmSync(sessionDir, { recursive: true, force: true });
+                console.log('[MultiSessionBot] ✅ Arquivos removidos');
+            } catch (e) {
+                console.error('[MultiSessionBot] ❌ Erro ao remover arquivos:', e.message);
+            }
+        }
+    }
+
+    /**
+     * 📊 RETORNA STATUS
+     */
+    getStatus(userId) {
+        const sock = this.sessions.get(userId);
+        const state = this.sessionStates.get(userId);
+
+        if (!sock || !state) {
+            return { 
+                connected: false, 
+                state: 'disconnected',
+                number: null,
+                qr: null
+            };
+        }
+
+        return {
+            connected: state.state === 'active',
+            state: state.state,
+            number: state.number,
+            qr: state.qr
+        };
+    }
+
+    /**
+     * 🔌 RETORNA SOCKET
      */
     getSocket(userId) {
-        const sessionId = userId.startsWith('session_') ? userId : `session_${userId}`;
-        const sock = this.sessions.get(sessionId);
-        
-        if (!sock) {
-            console.log(`[MultiSessionBot] ❌ Socket não encontrado para: ${sessionId}`);
-            return null;
-        }
-        
-        try {
-            // Verifica se está conectado
-            if (!sock.user) {
-                console.log(`[MultiSessionBot] ⚠️ Socket existe mas não está conectado`);
-                return null;
-            }
-            
-            return sock;
-        } catch (e) {
-            console.log(`[MultiSessionBot] ❌ Erro ao acessar socket:`, e.message);
-            return null;
-        }
+        return this.sessions.get(userId);
     }
 
-    limparSessao(sessionId) {
-        // Garante que usa sessionId com prefixo
-        const normalizedId = sessionId.startsWith('session_') ? sessionId : `session_${sessionId}`;
-        
-        const authPath = path.join(BASE_AUTH_DIR, normalizedId);
-        if (fs.existsSync(authPath)) {
-            fs.rmSync(authPath, { recursive: true, force: true });
-            console.log(`[MultiSessionBot] 🗑️ Sessão ${normalizedId} limpa`);
-        }
-    }
-
+    /**
+     * 🧹 LIMPEZA FORÇADA
+     */
     forceCleanAllSessions() {
+        console.log('[MultiSessionBot] 🧹 LIMPEZA FORÇADA DE TODAS AS SESSÕES');
+        
         let cleaned = 0;
-        if (fs.existsSync(BASE_AUTH_DIR)) {
-            const pastas = fs.readdirSync(BASE_AUTH_DIR);
-            for (const pasta of pastas) {
-                const fullPath = path.join(BASE_AUTH_DIR, pasta);
-                fs.rmSync(fullPath, { recursive: true, force: true });
-                cleaned++;
+
+        // Limpa memória
+        for (const [userId, sock] of this.sessions) {
+            try {
+                sock.end();
+            } catch (e) {}
+            cleaned++;
+        }
+
+        this.sessions.clear();
+        this.sessionStates.clear();
+
+        // Remove TODOS os arquivos
+        if (fs.existsSync(this.authDir)) {
+            try {
+                const files = fs.readdirSync(this.authDir);
+                for (const file of files) {
+                    const filePath = path.join(this.authDir, file);
+                    fs.rmSync(filePath, { recursive: true, force: true });
+                }
+                console.log(`[MultiSessionBot] ✅ ${files.length} diretórios removidos`);
+            } catch (e) {
+                console.error('[MultiSessionBot] ❌ Erro na limpeza:', e.message);
             }
         }
-        this.sessions.clear();
-        this.pendingConnections.clear();
-        this.error515Tracker.clear();
+
         return cleaned;
     }
 }
 
+// Exporta instância única (Singleton)
 module.exports = new MultiSessionBot();

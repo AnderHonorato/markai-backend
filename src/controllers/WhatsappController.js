@@ -1,6 +1,10 @@
+// backend/src/controllers/WhatsappController.js
 const MultiSessionBot = require('../services/MultiSessionBot');
 
 module.exports = {
+    /**
+     * 🔌 CONECTAR
+     */
     async connect(req, res) {
         const { userId, method, phoneNumber } = req.body;
         
@@ -9,7 +13,7 @@ module.exports = {
         }
 
         if (method === 'code' && !phoneNumber) {
-            return res.status(400).json({ error: 'Número de telefone é obrigatório' });
+            return res.status(400).json({ error: 'Número de telefone é obrigatório para código' });
         }
 
         try {
@@ -22,50 +26,48 @@ module.exports = {
             
             const result = await MultiSessionBot.startSession(userId, method, phoneNumber);
             
-            console.log(`[API] ✅ ${result.type}`);
+            console.log(`[API] ✅ Sucesso:`, result.type);
             return res.json(result);
             
         } catch (error) {
             console.error('[API] ❌ Erro:', error.message);
             
-            // Erro 515 com número de tentativas
-            if (error.message.includes('ERRO_515_PERSISTENTE')) {
-                const attempts = error.message.split('_').pop();
+            // Erro 515 - Outro dispositivo
+            if (error.message.includes('ERRO_515')) {
                 return res.status(409).json({ 
                     error: 'CONFLITO_DISPOSITIVO',
-                    message: `Outro dispositivo conectado (tentativa ${attempts}/3)`,
-                    solution: attempts >= 3 
-                        ? 'Bloqueado. Use POST /whatsapp/force-cleanup e aguarde 2 minutos'
-                        : 'Desconecte todos os dispositivos no WhatsApp e tente novamente'
+                    message: 'Outro WhatsApp está conectado neste número. Desconecte todos os dispositivos e tente novamente.',
+                    solution: 'Abra WhatsApp → Dispositivos Conectados → Desconecte todos'
                 });
             }
             
-            if (error.message.includes('BLOQUEIO_TEMPORARIO')) {
-                return res.status(429).json({ 
-                    error: 'BLOQUEIO_TEMPORARIO',
-                    message: 'Muitas tentativas com erro 515. Execute limpeza forçada.',
-                    action: 'POST /whatsapp/force-cleanup'
-                });
-            }
-            
+            // Timeout
             if (error.message.includes('TIMEOUT')) {
                 return res.status(408).json({ 
-                    error: 'Tempo esgotado' 
+                    error: 'TIMEOUT',
+                    message: 'Tempo esgotado. Tente novamente.'
                 });
             }
             
-            if (error.message.includes('CODIGO_EXPIRADO')) {
+            // Logout/Sessão inválida
+            if (error.message.includes('LOGOUT')) {
                 return res.status(401).json({ 
-                    error: 'Código expirou. Gere novo código.' 
+                    error: 'SESSAO_INVALIDA',
+                    message: 'Sessão inválida. Gere um novo código/QR.'
                 });
             }
             
+            // Erro genérico
             return res.status(500).json({ 
-                error: error.message || 'Falha ao conectar' 
+                error: 'FALHA_CONEXAO',
+                message: error.message || 'Falha ao conectar'
             });
         }
     },
 
+    /**
+     * 🔌 DESCONECTAR
+     */
     async disconnect(req, res) {
         const { userId } = req.body;
         
@@ -77,13 +79,20 @@ module.exports = {
             const success = await MultiSessionBot.disconnectSession(userId);
             return res.json({ 
                 success, 
-                message: success ? 'Desconectado' : 'Nenhuma sessão ativa' 
+                message: success ? 'Desconectado com sucesso' : 'Nenhuma sessão ativa encontrada' 
             });
         } catch (error) {
-            return res.status(500).json({ error: 'Erro ao desconectar' });
+            console.error('[API] Erro ao desconectar:', error);
+            return res.status(500).json({ 
+                error: 'Erro ao desconectar',
+                message: error.message 
+            });
         }
     },
 
+    /**
+     * 📊 VERIFICAR STATUS
+     */
     async getStatus(req, res) {
         const { userId } = req.params;
         
@@ -95,39 +104,26 @@ module.exports = {
             const status = MultiSessionBot.getStatus(userId);
             return res.json(status);
         } catch (error) {
+            console.error('[API] Erro ao verificar status:', error);
             return res.status(500).json({ 
                 connected: false, 
+                state: 'error',
                 number: null,
-                error: 'Erro ao verificar status' 
+                error: error.message
             });
         }
     },
 
     /**
-     * 🆕 LIMPEZA FORÇADA - Use quando erro 515 persistir
+     * 🧹 LIMPEZA FORÇADA (Emergência)
      */
     async forceCleanup(req, res) {
         try {
             console.log('\n🗑️ LIMPEZA FORÇADA INICIADA...\n');
             
-            // Encerra todas as sessões ativas
-            const activeSessions = Array.from(MultiSessionBot.sessions || new Map());
-            for (const [userId, sock] of activeSessions) {
-                try {
-                    sock.end();
-                    console.log(`✅ Sessão ${userId} encerrada`);
-                } catch (e) {}
-            }
-            
-            // Limpa memória
-            if (MultiSessionBot.sessions) {
-                MultiSessionBot.sessions.clear();
-            }
-            
-            // Remove TODOS os arquivos
             const cleaned = MultiSessionBot.forceCleanAllSessions();
             
-            // Aguarda
+            // Aguarda para garantir que arquivos foram liberados
             await new Promise(resolve => setTimeout(resolve, 3000));
             
             console.log('✅ LIMPEZA COMPLETA!\n');
@@ -135,7 +131,7 @@ module.exports = {
             return res.json({
                 success: true,
                 message: 'Sistema limpo completamente',
-                cleaned: cleaned,
+                sessionsRemoved: cleaned,
                 nextStep: 'Aguarde 2 minutos antes de conectar novamente',
                 timestamp: new Date().toISOString()
             });
