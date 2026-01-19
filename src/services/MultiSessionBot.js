@@ -283,37 +283,67 @@ class MultiSessionBot {
                 }
             });
 
-            if (method === 'code' && phoneNumber) {
-                // Delay de 10s fundamental para o Render estabilizar a conexão TCP/TLS
+                if (method === 'code' && phoneNumber) {
+                // Delay de 10s para estabilizar o socket no Render
                 setTimeout(async () => {
                     try {
-                        // 1. Limpeza inicial (apenas números)
-                        let cleanNumber = phoneNumber.replace(/\D/g, ''); 
+                        let cleanNumber = phoneNumber.replace(/\D/g, '');
+                        let code = null;
 
-                        // 2. Lógica do Nono Dígito (Brasil)
-                        // Se o número tem 13 dígitos (55 + DDD + 9 + OITO DÍGITOS)
-                        if (cleanNumber.startsWith('55') && cleanNumber.length === 13) {
-                            // Muitos WhatsApps no Brasil ainda são registrados SEM o 9 extra no servidor
-                            // Se o pareamento falhar com 13 dígitos, o código abaixo ajuda a tratar
-                            console.log(`[MultiSessionBot] Tentando pareamento com 13 dígitos: ${cleanNumber}`);
+                        console.log(`[MultiSessionBot] 🛠️ Iniciando tentativas para: ${cleanNumber}`);
+
+                        // FUNÇÃO INTERNA PARA TENTAR O CÓDIGO
+                        const tryRequest = async (num) => {
+                            console.log(`[MultiSessionBot] 📲 Tentando código para: ${num}`);
+                            return await sock.requestPairingCode(num);
+                        };
+
+                        try {
+                            // TENTATIVA 1: Número como veio (Limpando apenas caracteres)
+                            code = await tryRequest(cleanNumber);
+                        } catch (err) {
+                            console.log(`[MultiSessionBot] ⚠️ Falha na 1ª tentativa. Erro: ${err.message}`);
+
+                            // TENTATIVA 2: Se for Brasil e tiver 13 dígitos, tenta REMOVER o 9º dígito
+                            if (cleanNumber.startsWith('55') && cleanNumber.length === 13) {
+                                const ddd = cleanNumber.substring(2, 4);
+                                const resto = cleanNumber.substring(5);
+                                const semNono = '55' + ddd + resto;
+                                console.log(`[MultiSessionBot] 🔄 Tentando sem o 9º dígito: ${semNono}`);
+                                code = await tryRequest(semNono);
+                                cleanNumber = semNono; // Atualiza para o sucesso
+                            } else if (cleanNumber.startsWith('55') && cleanNumber.length === 12) {
+                                // TENTATIVA 3: Se tiver 12 dígitos, tenta ADICIONAR o 9º dígito (raro, mas acontece)
+                                const ddd = cleanNumber.substring(2, 4);
+                                const resto = cleanNumber.substring(4);
+                                const comNono = '55' + ddd + '9' + resto;
+                                console.log(`[MultiSessionBot] 🔄 Tentando com o 9º dígito: ${comNono}`);
+                                code = await tryRequest(comNono);
+                                cleanNumber = comNono;
+                            } else {
+                                throw err; // Se não for caso de 9º dígito, repassa o erro
+                            }
                         }
 
-                        const code = await sock.requestPairingCode(cleanNumber);
-                        
-                        clearTimeout(timeout);
-                        console.log(`[MultiSessionBot] 🔑 Código Gerado com sucesso: ${code}`);
-                        resolve({ type: 'code', data: code, number: cleanNumber });
+                        if (code) {
+                            clearTimeout(timeout);
+                            console.log(`[MultiSessionBot] ✅ SUCESSO! Código: ${code} para ${cleanNumber}`);
+                            resolve({ type: 'code', data: code, number: cleanNumber });
+                        }
 
                     } catch (error) {
-                        console.error("[MultiSessionBot] Erro crítico ao pedir código:", error);
+                        console.error("[MultiSessionBot] ❌ Todas as tentativas falharam:", error.message);
                         
-                        // Se der erro 428, tentamos fechar o socket para não travar o processo
-                        try { sock.end(); } catch (e) {}
-                        
+                        // Tratamento específico para erro de conexão fechada (428)
+                        if (error.message.includes('Closed') || error.message.includes('428')) {
+                            console.log("[MultiSessionBot] 💡 Dica: O Render cortou a conexão. Tente novamente em instantes.");
+                        }
+
                         clearTimeout(timeout);
+                        try { sock.end(); } catch (e) {}
                         reject(new Error('FALHA_CODIGO'));
                     }
-                }, 10000); // Mantido em 10 segundos
+                }, 10000); 
             }
         });
     }
