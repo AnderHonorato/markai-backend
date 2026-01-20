@@ -9,9 +9,110 @@ const SPIDER_API_BASE_URL = 'https://api.spiderx.com.br/api/ai/gemini';
 const conversationStates = {};
 const socketsByProfessional = {};
 
+// ✅ SISTEMA DE DEBOUNCE PARA EVITAR SPAM
+const messageQueue = {}; // Armazena mensagens pendentes
+const responseTimers = {}; // Timers de espera
+const typingIntervals = {}; // Intervalos de "digitando..."
+
+const DEBOUNCE_TIME = 15000; // 15 segundos de espera
+const TYPING_INTERVAL = 5000; // Envia "digitando..." a cada 5 segundos
+
 function registrarSocket(professionalId, sock) {
     socketsByProfessional[professionalId] = sock;
     console.log(`[IA] Socket registrado para profissional: ${professionalId}`);
+}
+
+// ✅ NOVA FUNÇÃO: Adiciona mensagem à fila e agenda resposta
+async function processarMensagemComDebounce(mensagemUsuario, dadosProfissional, historico, phoneNumber, enviarResposta, enviarDigitando) {
+    const clienteId = phoneNumber || 'unknown';
+    
+    // ✅ VERIFICA SE ESTÁ BLOQUEADO (ENCERRADO)
+    const estado = conversationStates[clienteId];
+    if (estado && estado.etapa === 'BLOQUEADO') {
+        console.log(`[DEBOUNCE] 🚫 Cliente bloqueado - ignorando mensagem`);
+        return; // ✅ IGNORA COMPLETAMENTE A MENSAGEM
+    }
+    
+    // Inicializa fila se não existir
+    if (!messageQueue[clienteId]) {
+        messageQueue[clienteId] = [];
+    }
+    
+    // Adiciona mensagem à fila
+    messageQueue[clienteId].push(mensagemUsuario);
+    console.log(`[DEBOUNCE] 📥 Mensagem adicionada à fila (${clienteId}): "${mensagemUsuario}"`);
+    
+    // Cancela timer anterior se existir
+    if (responseTimers[clienteId]) {
+        clearTimeout(responseTimers[clienteId]);
+        console.log(`[DEBOUNCE] ⏸️ Timer cancelado - aguardando mais mensagens`);
+    }
+    
+    // Cancela intervalo de "digitando..." anterior
+    if (typingIntervals[clienteId]) {
+        clearInterval(typingIntervals[clienteId]);
+        delete typingIntervals[clienteId];
+    }
+    
+    // ✅ ENVIA "DIGITANDO..." IMEDIATAMENTE
+    if (enviarDigitando) {
+        enviarDigitando();
+        console.log(`[DEBOUNCE] ⌨️ Status "digitando..." enviado`);
+    }
+    
+    // ✅ CRIA INTERVALO PARA ENVIAR "DIGITANDO..." A CADA 5 SEGUNDOS
+    typingIntervals[clienteId] = setInterval(() => {
+        if (enviarDigitando) {
+            enviarDigitando();
+            console.log(`[DEBOUNCE] ⌨️ Status "digitando..." reenviado`);
+        }
+    }, TYPING_INTERVAL);
+    
+    // Cria novo timer
+    responseTimers[clienteId] = setTimeout(async () => {
+        console.log(`[DEBOUNCE] ⏰ Timer finalizado - processando mensagens`);
+        
+        // ✅ PARA O INTERVALO DE "DIGITANDO..."
+        if (typingIntervals[clienteId]) {
+            clearInterval(typingIntervals[clienteId]);
+            delete typingIntervals[clienteId];
+        }
+        
+        // Pega todas as mensagens da fila
+        const mensagensAgrupadas = [...messageQueue[clienteId]];
+        messageQueue[clienteId] = []; // Limpa a fila
+        
+        console.log(`[DEBOUNCE] 📨 Processando ${mensagensAgrupadas.length} mensagem(ns)`);
+        
+        // Junta todas as mensagens em uma só
+        const mensagemCompleta = mensagensAgrupadas.join(' ');
+        
+        try {
+            // Processa a mensagem completa
+            const resposta = await gerarRespostaProfissional(
+                mensagemCompleta,
+                dadosProfissional,
+                historico,
+                phoneNumber
+            );
+            
+            // Envia resposta
+            if (resposta) {
+                enviarResposta(resposta);
+                console.log(`[DEBOUNCE] ✅ Resposta enviada`);
+            }
+            
+        } catch (error) {
+            console.error('[DEBOUNCE] ❌ Erro ao processar:', error);
+            enviarResposta('❌ Ops! Tive um problema. Pode tentar novamente?');
+        }
+        
+        // Limpa o timer
+        delete responseTimers[clienteId];
+        
+    }, DEBOUNCE_TIME);
+    
+    console.log(`[DEBOUNCE] ⏳ Timer iniciado - aguardando ${DEBOUNCE_TIME/1000}s`);
 }
 
 async function gerarRespostaProfissional(mensagemUsuario, dadosProfissional, historico = [], phoneNumber = null) {
@@ -23,6 +124,31 @@ async function gerarRespostaProfissional(mensagemUsuario, dadosProfissional, his
     // ✅ DETECTA INTENÇÃO DE AGENDAR
     const palavrasAgendamento = ['agendar', 'marcar', 'horário', 'horario', 'marcar hora', 'quero marcar'];
     const querAgendar = palavrasAgendamento.some(palavra => msgLower.includes(palavra));
+    
+    // ✅ SE ESTIVER BLOQUEADO E QUER AGENDAR, DESBLOQUEIA
+    if (conversationStates[clienteId] && conversationStates[clienteId].etapa === 'BLOQUEADO') {
+        if (querAgendar) {
+            console.log(`[IA] 🔓 Desbloqueando cliente - quer agendar`);
+            conversationStates[clienteId] = {
+                etapa: 'ESCOLHENDO_SERVICO',
+                modoAgendamento: true,
+                servicoEscolhido: null,
+                diaEscolhido: null,
+                horaEscolhida: null,
+                nomeCliente: null,
+                cpfCliente: null,
+                emailCliente: null,
+                telefoneCliente: phoneNumber,
+                appointmentId: null,
+                confirmandoMultiplo: false
+            };
+            return montarMensagemServicos(servicos, profissionalNome);
+        } else {
+            // ✅ ESTÁ BLOQUEADO E NÃO QUER AGENDAR - NÃO RESPONDE
+            console.log(`[IA] 🚫 Cliente bloqueado tentando conversar - ignorando`);
+            return null; // ✅ RETORNA NULL PARA NÃO ENVIAR NADA
+        }
+    }
     
     if (querAgendar && (!conversationStates[clienteId] || conversationStates[clienteId].etapa === 'CONVERSANDO_IA' || conversationStates[clienteId].etapa === 'ENCERRADO')) {
         conversationStates[clienteId] = {
@@ -57,7 +183,8 @@ async function gerarRespostaProfissional(mensagemUsuario, dadosProfissional, his
             telefoneCliente: phoneNumber,
             appointmentId: null,
             confirmandoMultiplo: false,
-            mensagensIA: 0
+            mensagensIA: 0,
+            ultimaInteracao: Date.now()
         };
     }
     
@@ -72,41 +199,43 @@ async function gerarRespostaProfissional(mensagemUsuario, dadosProfissional, his
             return `Até logo! 👋\nQualquer coisa, é só chamar!`;
         }
         
+        // ✅ ATUALIZA ÚLTIMA INTERAÇÃO
+        estado.ultimaInteracao = Date.now();
+        
         // ✅ INCREMENTA CONTADOR DE MENSAGENS
         estado.mensagensIA = (estado.mensagensIA || 0) + 1;
         
-        // ✅ SE PASSOU DE 3 MENSAGENS SEM AGENDAR, ENCERRA E BLOQUEIA
-        if (estado.mensagensIA > 3) {
-            estado.etapa = 'ENCERRADO'; // ✅ MARCA COMO ENCERRADO
-            return `🤖 Parece que você está só conversando comigo!\n\n😅 Sou uma IA e estou aqui para ajudar com agendamentos.\n\n💡 Se quiser marcar horário, é só digitar *"agendar"*!\n\nAté mais! 👋`;
+        // ✅ SE PASSOU DE 5 MENSAGENS SEM AGENDAR, ENCERRA E BLOQUEIA
+        if (estado.mensagensIA >= 5) {
+            estado.etapa = 'BLOQUEADO'; // ✅ BLOQUEIA COMPLETAMENTE
+            console.log(`[IA] 🚫 Cliente bloqueado após ${estado.mensagensIA} mensagens sem agendar`);
+            return `🤖 Percebi que você está conversando sem intenção de agendar.\n\n😊 Sou uma IA focada em agendamentos, não consigo bater papo.\n\n✨ Se mudar de ideia e quiser *agendar*, é só me chamar!\n\nAté mais! 👋`;
         }
         
         return await conversarComIA(mensagemUsuario, profissionalNome, servicos, historico);
     }
     
-        if (estado.etapa === 'ENCERRADO') {
-            if (querAgendar) {
-                estado.etapa = 'ESCOLHENDO_SERVICO';
-                estado.modoAgendamento = true;
-                estado.mensagensIA = 0;
-                estado.respostasEncerrado = 0;
-                return montarMensagemServicos(servicos, profissionalNome);
-            }
-
-            estado.respostasEncerrado = (estado.respostasEncerrado || 0) + 1;
-
-            const mensagensVariadas = [
-                `💡 Para agendar, digite *"agendar"*`,
-                `😊 Quando quiser marcar, é só digitar *"agendar"*`,
-                `✨ Estou aqui quando precisar! Digite *"agendar"*`,
-                `📅 Pronto para agendar? Digite *"agendar"*`
-            ];
-
-            const index = estado.respostasEncerrado % mensagensVariadas.length;
-            return mensagensVariadas[index];
+    if (estado.etapa === 'ENCERRADO') {
+        if (querAgendar) {
+            estado.etapa = 'ESCOLHENDO_SERVICO';
+            estado.modoAgendamento = true;
+            estado.mensagensIA = 0;
+            estado.respostasEncerrado = 0;
+            return montarMensagemServicos(servicos, profissionalNome);
         }
-        
-        // Após
+
+        estado.respostasEncerrado = (estado.respostasEncerrado || 0) + 1;
+
+        const mensagensVariadas = [
+            `💡 Para agendar, digite *"agendar"*`,
+            `😊 Quando quiser marcar, é só digitar *"agendar"*`,
+            `✨ Estou aqui quando precisar! Digite *"agendar"*`,
+            `📅 Pronto para agendar? Digite *"agendar"*`
+        ];
+
+        const index = estado.respostasEncerrado % mensagensVariadas.length;
+        return mensagensVariadas[index];
+    }
     
     // ============================================
     // FLUXO DE AGENDAMENTO
@@ -328,7 +457,6 @@ async function gerarRespostaProfissional(mensagemUsuario, dadosProfissional, his
             
             if (clienteExistente) {
                 console.log(`[IA] ✅ Cliente já cadastrado: ${clienteExistente.name}`);
-                console.log(`[IA] 📞 Telefone do cliente: ${clienteExistente.phone}`);
                 
                 estado.emailCliente = email;
                 estado.nomeCliente = clienteExistente.name;
@@ -340,7 +468,6 @@ async function gerarRespostaProfissional(mensagemUsuario, dadosProfissional, his
                 return `🎉 *Que bom te ver de novo, ${clienteExistente.name}!*\n\n📋 *Vamos confirmar os detalhes do seu agendamento:*\n\n💎 *Serviço:* ${estado.servicoEscolhido.name}\n💰 *Valor:* R$ ${parseFloat(estado.servicoEscolhido.price).toFixed(2)}\n📅 *Data:* ${formatarData(estado.diaEscolhido)}\n🕐 *Horário:* ${estado.horaEscolhida}\n👤 *Cliente:* ${clienteExistente.name}\n📧 *E-mail:* ${email}\n\n*Está tudo certo?*\n\n• Digite *"sim"* para confirmar\n• Digite *"não"* se quiser mudar algo`;
             }
             
-            console.log(`[IA] ⚠️ E-mail não encontrado - iniciando cadastro`);
             estado.emailCliente = email;
             estado.etapa = 'COLETANDO_NOME';
             
@@ -352,7 +479,7 @@ async function gerarRespostaProfissional(mensagemUsuario, dadosProfissional, his
         } 
     }
     
-    // ✅ ETAPA: CONFIRMANDO AGENDAMENTO (CLIENTE EXISTENTE)
+    // ETAPA: CONFIRMANDO AGENDAMENTO (CLIENTE EXISTENTE)
     if (estado.etapa === 'CONFIRMANDO_AGENDAMENTO') {
         const resposta = msgLower;
         
@@ -386,7 +513,6 @@ async function gerarRespostaProfissional(mensagemUsuario, dadosProfissional, his
             return `❌ *Nome muito curto*\n\n😊 Por favor, informe seu nome completo`;
         }
         
-        // ✅ VALIDA SE NÃO É EMAIL
         if (nome.includes('@') || nome.includes('.com')) {
             return `❌ *Ops! Isso parece ser um e-mail*\n\n😊 Preciso do seu *nome completo*, por favor`;
         }
@@ -430,7 +556,7 @@ async function gerarRespostaProfissional(mensagemUsuario, dadosProfissional, his
         return `📋 *Perfeito! Vamos revisar tudo antes de confirmar:*\n\n*📅 Detalhes do Agendamento:*\n💎 *Serviço:* ${estado.servicoEscolhido.name}\n💰 *Valor:* R$ ${parseFloat(estado.servicoEscolhido.price).toFixed(2)}\n📅 *Data:* ${formatarData(estado.diaEscolhido)}\n🕐 *Horário:* ${estado.horaEscolhida}\n\n*👤 Seus Dados:*\n• *Nome:* ${estado.nomeCliente}\n• *CPF:* ${formatarCPF(estado.cpfCliente)}\n• *E-mail:* ${estado.emailCliente}\n• *Telefone:* ${formatarTelefone(telefoneFormatado)}\n\n*Está tudo certo?*\n\n• Digite *"sim"* para confirmar\n• Digite *"não"* se precisar corrigir algo`;
     }
     
-    // ✅ ETAPA: CONFIRMANDO CADASTRO NOVO
+    // ETAPA: CONFIRMANDO CADASTRO NOVO
     if (estado.etapa === 'CONFIRMANDO_CADASTRO_NOVO') {
         const resposta = msgLower;
         
@@ -465,16 +591,18 @@ async function conversarComIA(mensagem, profissionalNome, servicos, historico) {
         const promptSistema = `Você é Markaí, assistente virtual carismática e objetiva de ${profissionalNome}.
 
 PERSONALIDADE:
-- Seja simpática, mas DIRETA e OBJETIVA
-- Máximo 2-3 linhas por resposta
-- Use emojis com moderação (1-2 por mensagem)
+- Seja simpática, mas descontraida, profissional e objetiva
+- Evite respostas longas
+- Máximo 3 paragrafos de texto de 3 linhas por resposta
+- Use emojis com moderação (1 ou por mensagem)
 - Seja profissional mas amigável
 
 REGRAS CRÍTICAS:
-1. Fale APENAS sobre: serviços, horários e agendamentos
-2. Se perguntarem sobre agendamento: "Digite *'agendar'* para começar!"
-3. NÃO converse sobre outros assuntos
-4. Se cliente ficar enrolando (mais de 3 mensagens sem agendar), diga: "Parece que você só quer conversar! 😅 Quando quiser agendar, digite *'agendar'*. Até mais! 👋"
+1. Fale APENAS sobre: serviços, horários e agendamentos com ${profissionalNome}
+2. Se perguntarem sobre agendamento: " Digite *'agendar'* para começar!"
+3. NÃO converse sobre outros assuntos (fale que não é o foco da Markaí)
+4. NUNCA mencione que vai finalizar a conversa - isso é automático
+
 
 SERVIÇOS DISPONÍVEIS:
 ${listaServicos || 'Consulte o profissional para ver os serviços'}
@@ -505,7 +633,6 @@ NUNCA repita a mesma mensagem. Varie as respostas.`;
         
         let resposta = response.data?.response?.trim() || 'Desculpe, não entendi.';
         
-        // ✅ LIMITA TAMANHO DA RESPOSTA
         if (resposta.length > 200) {
             resposta = resposta.substring(0, 197) + '...';
         }
@@ -535,7 +662,6 @@ function montarMensagemServicos(servicos, profissionalNome) {
 async function finalizarAgendamento(estado, telefoneCliente, professionalId, clienteExistente = null) {
     let cliente = clienteExistente;
     
-    // ✅ GARANTE QUE TELEFONE ESTÁ NO FORMATO CORRETO
     let telefoneFormatado = telefoneCliente;
     if (!telefoneFormatado.startsWith('55')) {
         telefoneFormatado = '55' + telefoneFormatado.replace(/\D/g, '');
@@ -543,10 +669,6 @@ async function finalizarAgendamento(estado, telefoneCliente, professionalId, cli
     
     if (!cliente) {
         console.log('[IA] 📝 Criando novo cliente...');
-        console.log('[IA] Nome:', estado.nomeCliente);
-        console.log('[IA] CPF:', estado.cpfCliente);
-        console.log('[IA] Email:', estado.emailCliente);
-        console.log('[IA] Telefone formatado:', telefoneFormatado);
         
         cliente = await prisma.user.create({
             data: {
@@ -581,9 +703,7 @@ async function finalizarAgendamento(estado, telefoneCliente, professionalId, cli
     });
     
     console.log('[IA] 📅 Agendamento criado! ID:', appointment.id);
-    console.log('[IA] 📲 Telefone do cliente (do banco):', cliente.phone);
     
-    // ✅ PASSA O TELEFONE DO BANCO DE DADOS
     iniciarVerificacaoConfirmacao(appointment.id, cliente.phone, professionalId);
     
     return `✅ *Tudo certo! Seu agendamento foi solicitado com sucesso!*\n\n📋 *Resumo Final:*\n💎 ${estado.servicoEscolhido?.name}\n👤 ${estado.nomeCliente}\n📅 ${formatarData(estado.diaEscolhido)}\n🕐 ${estado.horaEscolhida}\n\n⏳ *Aguardando confirmação do profissional...*\n\nAssim que for confirmado, você receberá uma notificação aqui no WhatsApp! 📲\n\n😊 Obrigado pela preferência!`;
@@ -737,16 +857,15 @@ function formatarTelefone(telefone) {
     return telefone;
 }
 
-// ✅ FUNÇÃO PLACEHOLDER PARA VERIFICAÇÃO DE CONFIRMAÇÃO
 function iniciarVerificacaoConfirmacao(appointmentId, telefoneCliente, professionalId) {
     console.log(`[IA] ⏳ Iniciando verificação de confirmação`);
     console.log(`[IA] Appointment ID: ${appointmentId}`);
     console.log(`[IA] Telefone cliente: ${telefoneCliente}`);
     console.log(`[IA] Professional ID: ${professionalId}`);
-    // TODO: Implementar lógica de verificação e notificação
 }
 
 module.exports = { 
     gerarRespostaProfissional,
+    processarMensagemComDebounce,
     registrarSocket
 };

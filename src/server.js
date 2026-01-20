@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const routes = require('./routes');
 const MultiSessionBot = require('./services/MultiSessionBot');
+const SessionPersistence = require('./services/SessionPersistence');
 
 const app = express();
 
@@ -10,7 +11,6 @@ const app = express();
 // CONFIGURAÇÕES MIDDLEWARE
 // ====================================
 
-// Limite para imagens Base64
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cors());
@@ -32,9 +32,11 @@ app.use((req, res, next) => {
 app.use(routes);
 
 // Rota de health check (para monitoramento)
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
     const uptime = process.uptime();
     const activeSessions = MultiSessionBot.sessions ? MultiSessionBot.sessions.size : 0;
+    const stats = SessionPersistence.getStats();
+    const healthCheck = await MultiSessionBot.healthCheck();
     
     res.json({
         status: 'ok',
@@ -42,8 +44,27 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString(),
         whatsapp: {
             activeSessions,
-            ready: true
-        }
+            ready: true,
+            ...healthCheck
+        },
+        persistence: stats
+    });
+});
+
+// Nova rota para estatísticas detalhadas
+app.get('/stats', async (req, res) => {
+    const stats = SessionPersistence.getStats();
+    const healthCheck = await MultiSessionBot.healthCheck();
+    const sessionsData = SessionPersistence.getSessionsToRestore();
+    
+    res.json({
+        persistence: stats,
+        health: healthCheck,
+        sessions: sessionsData.map(s => ({
+            userId: s.userId,
+            lastConnected: s.lastConnected,
+            status: s.status
+        }))
     });
 });
 
@@ -58,130 +79,99 @@ app.use((err, req, res, next) => {
 });
 
 // ====================================
-// RESTAURAÇÃO DE SESSÕES (OPCIONAL)
-// ====================================
-
-async function restoreSessions() {
-    console.log('\n🔄 RESTAURANDO SESSÕES SALVAS...');
-    
-    try {
-        const fs = require('fs');
-        const path = require('path');
-        const authDir = path.join(__dirname, '../auth_sessions');
-        
-        if (!fs.existsSync(authDir)) {
-            console.log('📂 Nenhuma sessão anterior encontrada');
-            return;
-        }
-
-        const sessions = fs.readdirSync(authDir).filter(dir => dir.startsWith('session_'));
-        console.log(`📂 Encontradas ${sessions.length} sessões`);
-        
-        if (sessions.length === 0) {
-            console.log('✅ RESTAURAÇÃO COMPLETA: 0 sessões ativas');
-            return;
-        }
-
-        // Tenta restaurar cada sessão
-        let restored = 0;
-        for (const sessionDir of sessions) {
-            try {
-                const userId = sessionDir.replace('session_', '');
-                const sessionPath = path.join(authDir, sessionDir);
-                
-                // Verifica se tem credenciais
-                const credsFile = path.join(sessionPath, 'creds.json');
-                if (fs.existsSync(credsFile)) {
-                    console.log(`🔄 Tentando restaurar sessão: ${userId}`);
-                    
-                    // Tenta reconectar automaticamente
-                    await MultiSessionBot.startSession(userId, 'qr');
-                    restored++;
-                    
-                    console.log(`✅ Sessão ${userId} restaurada`);
-                } else {
-                    console.log(`⚠️ Sessão ${userId} sem credenciais, removendo...`);
-                    fs.rmSync(sessionPath, { recursive: true, force: true });
-                }
-            } catch (error) {
-                console.error(`❌ Erro ao restaurar sessão ${sessionDir}:`, error.message);
-            }
-        }
-        
-        console.log(`✅ RESTAURAÇÃO COMPLETA: ${restored} sessões ativas\n`);
-        
-    } catch (error) {
-        console.error('❌ Erro na restauração de sessões:', error.message);
-    }
-}
-
-// ====================================
 // KEEP-ALIVE (Anti-Hibernação Render)
 // ====================================
 
 function setupKeepAlive() {
     const PING_INTERVAL = 14 * 60 * 1000; // 14 minutos
-    const APP_URL = process.env.RENDER_EXTERNAL_URL || 'https://markai-backend.onrender.com';
+    const APP_URL = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || 'http://localhost:10000';
     
-    if (process.env.NODE_ENV === 'production') {
-        console.log('⏰ Keep-Alive ativado (14 minutos)');
-        
-        setInterval(async () => {
-            try {
-                const https = require('https');
-                https.get(`${APP_URL}/health`, (res) => {
-                    console.log(`💓 Keep-alive ping: ${res.statusCode}`);
-                }).on('error', (err) => {
-                    console.error('⚠️ Keep-alive falhou:', err.message);
-                });
-            } catch (error) {
-                console.error('⚠️ Erro no keep-alive:', error.message);
-            }
-        }, PING_INTERVAL);
-    }
+    console.log('⏰ Keep-Alive ativado (14 minutos)');
+    console.log(`📍 URL: ${APP_URL}`);
+    
+    setInterval(async () => {
+        try {
+            const https = require('https');
+            const http = require('http');
+            const client = APP_URL.startsWith('https') ? https : http;
+            
+            client.get(`${APP_URL}/health`, (res) => {
+                console.log(`💓 Keep-alive ping: ${res.statusCode}`);
+            }).on('error', (err) => {
+                console.error('⚠️ Keep-alive falhou:', err.message);
+            });
+        } catch (error) {
+            console.error('⚠️ Erro no keep-alive:', error.message);
+        }
+    }, PING_INTERVAL);
 }
 
 // ====================================
-// LIMPEZA AUTOMÁTICA PERIÓDICA
+// VERIFICAÇÃO PERIÓDICA DE SAÚDE
+// ====================================
+
+function setupHealthMonitoring() {
+    const CHECK_INTERVAL = 5 * 60 * 1000; // 5 minutos
+    
+    console.log('🏥 Monitoramento de saúde ativado (a cada 5 minutos)');
+    
+    setInterval(async () => {
+        try {
+            const health = await MultiSessionBot.healthCheck();
+            
+            if (health.unhealthy > 0) {
+                console.log('\n⚠️ ALERTA: Sessões não saudáveis detectadas');
+                console.log(`├─ Total: ${health.total}`);
+                console.log(`├─ Saudáveis: ${health.healthy}`);
+                console.log(`└─ Não saudáveis: ${health.unhealthy}`);
+                
+                // Tenta reconectar sessões não saudáveis
+                for (const issue of health.details) {
+                    console.log(`🔄 Tentando recuperar sessão: ${issue.userId}`);
+                    try {
+                        await MultiSessionBot.restoreSession(issue.userId);
+                    } catch (error) {
+                        console.error(`❌ Falha ao recuperar ${issue.userId}:`, error.message);
+                    }
+                }
+            } else if (health.total > 0) {
+                console.log(`✅ Todas as ${health.total} sessões estão saudáveis`);
+            }
+            
+        } catch (error) {
+            console.error('❌ Erro no monitoramento de saúde:', error.message);
+        }
+    }, CHECK_INTERVAL);
+}
+
+// ====================================
+// LIMPEZA AUTOMÁTICA DE METADADOS ÓRFÃOS
+// ⚠️ APENAS LIMPA ARQUIVOS ÓRFÃOS - NUNCA DESCONECTA SESSÕES ATIVAS
 // ====================================
 
 function setupAutoCleaning() {
-    // Limpa sessões mortas a cada 6 horas
     const CLEAN_INTERVAL = 6 * 60 * 60 * 1000; // 6 horas
     
     setInterval(() => {
-        console.log('\n🧹 LIMPEZA AUTOMÁTICA INICIADA...');
+        console.log('\n🧹 LIMPEZA AUTOMÁTICA DE METADADOS ÓRFÃOS...');
         
         try {
-            const fs = require('fs');
-            const path = require('path');
-            const authDir = path.join(__dirname, '../auth_sessions');
+            // ⚠️ IMPORTANTE: Apenas limpa metadados órfãos
+            // NUNCA remove sessões ativas ou com credenciais válidas
+            const orphaned = SessionPersistence.cleanOrphanedMetadata();
             
-            if (!fs.existsSync(authDir)) return;
-            
-            const sessions = fs.readdirSync(authDir).filter(dir => dir.startsWith('session_'));
-            let cleaned = 0;
-            
-            for (const sessionDir of sessions) {
-                const userId = sessionDir.replace('session_', '');
-                const status = MultiSessionBot.getStatus(userId);
-                
-                // Remove sessões desconectadas
-                if (!status.connected && status.state === 'disconnected') {
-                    console.log(`🗑️ Removendo sessão morta: ${userId}`);
-                    MultiSessionBot.cleanupSession(userId);
-                    cleaned++;
-                }
+            if (orphaned > 0) {
+                console.log(`✅ Limpeza concluída: ${orphaned} metadados órfãos removidos`);
+            } else {
+                console.log(`✅ Nenhum metadado órfão encontrado`);
             }
-            
-            console.log(`✅ Limpeza concluída: ${cleaned} sessões removidas\n`);
             
         } catch (error) {
             console.error('❌ Erro na limpeza automática:', error.message);
         }
     }, CLEAN_INTERVAL);
     
-    console.log('🧹 Limpeza automática ativada (a cada 6 horas)');
+    console.log('🧹 Limpeza automática ativada (apenas metadados órfãos, a cada 6 horas)');
 }
 
 // ====================================
@@ -189,14 +179,20 @@ function setupAutoCleaning() {
 // ====================================
 
 function logSystemStats() {
-    setInterval(() => {
+    setInterval(async () => {
         const used = process.memoryUsage();
         const activeSessions = MultiSessionBot.sessions ? MultiSessionBot.sessions.size : 0;
+        const stats = SessionPersistence.getStats();
+        const health = await MultiSessionBot.healthCheck();
         
         console.log('\n📊 STATUS DO SISTEMA:');
         console.log(`├─ Memória: ${Math.round(used.heapUsed / 1024 / 1024)} MB`);
         console.log(`├─ Uptime: ${Math.floor(process.uptime() / 60)} minutos`);
-        console.log(`└─ Sessões WhatsApp ativas: ${activeSessions}\n`);
+        console.log(`├─ Sessões WhatsApp ativas: ${activeSessions}`);
+        console.log(`├─ Sessões salvas: ${stats.total}`);
+        console.log(`├─ Sessões restauráveis: ${stats.restorable}`);
+        console.log(`├─ Saúde: ${health.healthy}/${health.total} saudáveis`);
+        console.log(`└─ Timestamp: ${new Date().toLocaleString('pt-BR')}\n`);
     }, 30 * 60 * 1000); // A cada 30 minutos
 }
 
@@ -219,26 +215,61 @@ app.listen(PORT, async () => {
     // Carrega rotas
     console.log('✅ Rotas carregadas com sucesso');
     
-    // Restaura sessões anteriores (OPCIONAL - comente se não quiser auto-restore)
-    // await restoreSessions();
+    // ====================================
+    // 🔄 RESTAURAÇÃO AUTOMÁTICA DE SESSÕES
+    // ====================================
     
-    // Ativa keep-alive em produção
-    if (process.env.NODE_ENV === 'production' || process.env.RENDER_EXTERNAL_URL) {
-        setupKeepAlive();
+    console.log('\n' + '═'.repeat(60));
+    console.log('🔄 INICIANDO RESTAURAÇÃO AUTOMÁTICA DE SESSÕES');
+    console.log('═'.repeat(60));
+    
+    try {
+        const restoreResult = await MultiSessionBot.restoreAllSessions();
+        
+        if (restoreResult.restored > 0) {
+            console.log('\n✅ SESSÕES RESTAURADAS COM SUCESSO!');
+            console.log(`   Total processadas: ${restoreResult.total}`);
+            console.log(`   Restauradas: ${restoreResult.restored}`);
+            console.log(`   Falhas: ${restoreResult.failed}`);
+        } else if (restoreResult.total === 0) {
+            console.log('\n📂 Nenhuma sessão anterior para restaurar');
+        } else {
+            console.log('\n⚠️ Algumas sessões falharam ao restaurar');
+            console.log(`   Restauradas: ${restoreResult.restored}`);
+            console.log(`   Falhas: ${restoreResult.failed}`);
+        }
+        
+    } catch (error) {
+        console.error('\n❌ ERRO NA RESTAURAÇÃO:', error.message);
     }
     
-    // Ativa limpeza automática
+    console.log('═'.repeat(60));
+    console.log();
+    
+    // ====================================
+    // ATIVAÇÃO DE SERVIÇOS
+    // ====================================
+    
+    // Ativa keep-alive
+    setupKeepAlive();
+    
+    // Ativa monitoramento de saúde
+    setupHealthMonitoring();
+    
+    // Ativa limpeza automática (APENAS METADADOS ÓRFÃOS)
     setupAutoCleaning();
     
-    // Ativa monitoramento de recursos
-    if (process.env.LOG_STATS === 'true') {
+    // Ativa monitoramento de recursos (se configurado)
+    if (process.env.LOG_STATS === 'true' || process.env.NODE_ENV === 'development') {
         logSystemStats();
     }
     
     console.log();
-    console.log('📱 WhatsApp Bot: Use a tela de configuração no app para conectar');
-    console.log('🔗 API: POST /whatsapp/connect');
+    console.log('📱 WhatsApp Bot: Sessões restauradas automaticamente');
+    console.log('💡 Sessões permanecem conectadas até desconexão manual');
+    console.log('🔗 API: POST /api/whatsapp/connect');
     console.log('📊 Health Check: GET /health');
+    console.log('📈 Estatísticas: GET /stats');
     console.log();
     console.log('='.repeat(60));
     console.log('✅ SERVIDOR PRONTO PARA RECEBER CONEXÕES');
@@ -253,25 +284,31 @@ app.listen(PORT, async () => {
 async function gracefulShutdown(signal) {
     console.log(`\n⚠️ ${signal} recebido. Encerrando servidor graciosamente...`);
     
-    // Para de aceitar novas conexões
     console.log('🔌 Fechando conexões ativas...');
     
-    // Desconecta todas as sessões WhatsApp
+    // Atualiza status de todas as sessões antes de desconectar
     if (MultiSessionBot.sessions) {
-        console.log('📱 Desconectando sessões WhatsApp...');
+        console.log('📱 Salvando estado das sessões WhatsApp...');
+        
         const sessions = Array.from(MultiSessionBot.sessions.keys());
         
         for (const userId of sessions) {
             try {
-                await MultiSessionBot.disconnectSession(userId);
-                console.log(`✅ Sessão ${userId} desconectada`);
+                // Atualiza status para 'shutdown'
+                SessionPersistence.updateSessionStatus(userId, 'shutdown');
+                
+                // NÃO desconecta - apenas salva o estado
+                // As credenciais já estão salvas e serão restauradas no próximo boot
+                console.log(`💾 Estado salvo: ${userId}`);
+                
             } catch (error) {
-                console.error(`❌ Erro ao desconectar ${userId}:`, error.message);
+                console.error(`❌ Erro ao salvar ${userId}:`, error.message);
             }
         }
     }
     
-    console.log('✅ Servidor encerrado com sucesso');
+    console.log('✅ Estados salvos com sucesso');
+    console.log('✅ Servidor encerrado - Sessões serão restauradas no próximo boot');
     process.exit(0);
 }
 
@@ -283,6 +320,14 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('uncaughtException', (error) => {
     console.error('💥 ERRO NÃO TRATADO:', error);
     console.error('Stack:', error.stack);
+    
+    // Salva estados antes de morrer
+    if (MultiSessionBot.sessions) {
+        const sessions = Array.from(MultiSessionBot.sessions.keys());
+        sessions.forEach(userId => {
+            SessionPersistence.updateSessionStatus(userId, 'crashed');
+        });
+    }
 });
 
 process.on('unhandledRejection', (reason, promise) => {

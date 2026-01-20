@@ -107,6 +107,7 @@ routes.get('/admin/message-stats', UserController.adminGetStats);
 // ========== SLUG (SEMPRE POR ÚLTIMO) ==========
 routes.get('/:slug', UserController.getBySlug);
 
+
 console.log('✅ Rotas carregadas com sucesso');
 
 module.exports = routes;

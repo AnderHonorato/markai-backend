@@ -1,6 +1,6 @@
 // backend/src/bot.js
 const { PrismaClient } = require('@prisma/client');
-const { gerarRespostaProfissional, registrarSocket } = require('./services/ai.service');
+const { processarMensagemComDebounce, registrarSocket } = require('./services/ai.service'); // ✅ IMPORTA DEBOUNCE
 
 const prisma = new PrismaClient();
 const chatStates = {}; 
@@ -22,8 +22,6 @@ async function handleIncomingMessage(msg, sessionId, sock) {
         
         // ✅ REGISTRA SOCKET PARA NOTIFICAÇÕES
         registrarSocket(professionalId, sock);
-        
-        console.log('[BOT] Mensagem completa:', JSON.stringify(msg, null, 2));
         
         // ✅ VALIDAÇÕES DE SEGURANÇA
         if (!msg) {
@@ -50,12 +48,9 @@ async function handleIncomingMessage(msg, sessionId, sock) {
                 };
             }
 
-            // 🔥 MARCA COMO ASSUMIDO
             chatStates[professionalId][remoteJid].assumidoPorHumano = true;
-
-            return; // IA NÃO RESPONDE
+            return;
         }
-
 
         console.log('[BOT] ✅ Não é mensagem própria');
 
@@ -132,15 +127,6 @@ async function handleIncomingMessage(msg, sessionId, sock) {
 
         console.log('[BOT] 📚 Histórico tem', state.historico.length, 'mensagens');
 
-        // Mostra "digitando..."
-        try {
-            console.log('[BOT] ⌨️ Enviando presença "composing"...');
-            await sock.sendPresenceUpdate('composing', remoteJid);
-            console.log('[BOT] ✅ Presença enviada');
-        } catch (e) {
-            console.log('[BOT] ⚠️ Erro ao enviar presença:', e.message);
-        }
-
         // ✅ BUSCA DADOS DO PROFISSIONAL
         console.log('[BOT] 🔍 Buscando profissional com ID:', professionalId);
         const professional = await prisma.user.findUnique({
@@ -169,9 +155,11 @@ async function handleIncomingMessage(msg, sessionId, sock) {
         console.log('[BOT] 📋 Serviços:', professional.services?.length || 0);
         console.log('[BOT] 📅 Agendamentos futuros:', professional.appointmentsAsPro?.length || 0);
 
-        // Gera resposta da IA
-        console.log('[BOT] 🤖 Gerando resposta da IA...');
-        const respostaIA = await gerarRespostaProfissional(text, {
+        // ========================================
+        // ✅ AQUI ESTÁ A MUDANÇA PRINCIPAL!
+        // ========================================
+        
+        const dadosProfissional = {
             profissionalNome: professional.companyName || professional.name,
             servicos: professional.services,
             agendaOcupada: professional.appointmentsAsPro,
@@ -181,26 +169,63 @@ async function handleIncomingMessage(msg, sessionId, sock) {
             },
             duracaoServico: professional.serviceDuration || 60,
             professionalId: professionalId
-        }, state.historico, phoneNumber);
+        };
 
-        // ✅ SE IA RETORNAR NULL, NÃO ENVIA NADA (ESTÁ MUDA)
-        if (respostaIA === null || respostaIA === undefined) {
-            console.log('[BOT] 🔇 IA está muda, não enviando resposta');
-            console.log('='.repeat(70) + '\n');
-            return;
-        }
+        // ✅ CALLBACK PARA ENVIAR "DIGITANDO..."
+        const enviarDigitando = async () => {
+            try {
+                await sock.sendPresenceUpdate('composing', remoteJid);
+                console.log('[BOT] ⌨️ Status "digitando..." enviado');
+            } catch (error) {
+                console.error('[BOT] ❌ Erro ao enviar digitando:', error.message);
+            }
+        };
 
-        console.log('[BOT] 💡 Resposta gerada:', respostaIA.substring(0, 100) + '...');
+        // ✅ CALLBACK PARA ENVIAR RESPOSTA
+        const enviarResposta = async (respostaIA) => {
+            try {
+                if (!respostaIA) {
+                    console.log('[BOT] 🔇 IA está muda/bloqueada - não enviando resposta');
+                    await sock.sendPresenceUpdate('available', remoteJid);
+                    return;
+                }
 
-        // Envia resposta
-        console.log('[BOT] 📤 Enviando resposta...');
-        await sock.sendMessage(remoteJid, { text: respostaIA });
+                console.log('[BOT] 💡 Resposta gerada:', respostaIA.substring(0, 100) + '...');
+                console.log('[BOT] 📤 Enviando resposta...');
+
+                // Para de digitar
+                await sock.sendPresenceUpdate('available', remoteJid);
+
+                // Envia mensagem
+                await sock.sendMessage(remoteJid, { text: respostaIA });
+                
+                // Salva no histórico
+                state.historico.push({ role: 'assistant', content: respostaIA });
+
+                console.log('[BOT] ✅ RESPOSTA ENVIADA COM SUCESSO!');
+                console.log('='.repeat(70) + '\n');
+
+            } catch (error) {
+                console.error('[BOT] ❌ Erro ao enviar resposta:', error.message);
+            }
+        };
+
+        // ========================================
+        // ✅ USA DEBOUNCE - NÃO RESPONDE IMEDIATAMENTE!
+        // ========================================
         
-        // Salva no histórico
-        state.historico.push({ role: 'assistant', content: respostaIA });
+        console.log('[BOT] 🤖 Processando com DEBOUNCE (15s)...');
 
-        console.log('[BOT] ✅ RESPOSTA ENVIADA COM SUCESSO!');
-        console.log('='.repeat(70) + '\n');
+        await processarMensagemComDebounce(
+            text,
+            dadosProfissional,
+            state.historico,
+            phoneNumber,
+            enviarResposta,    // ✅ Callback para responder
+            enviarDigitando    // ✅ Callback para "digitando..."
+        );
+
+        console.log('[BOT] ⏳ Mensagem adicionada à fila de debounce');
 
     } catch (error) {
         console.error('\n' + '❌'.repeat(35));

@@ -8,139 +8,120 @@ module.exports = {
     async connect(req, res) {
         const { userId, method, phoneNumber } = req.body;
         
+        console.log(`\n${'🔥'.repeat(35)}`);
+        console.log(`[API] Requisição de conexão recebida`);
+        console.log(`[API] User: ${userId} | Método: ${method}`);
+        console.log(`${'🔥'.repeat(35)}\n`);
+        
         if (!userId) {
-            return res.status(400).json({ error: 'userId é obrigatório' });
+            return res.status(400).json({ 
+                error: 'VALIDACAO',
+                message: 'userId é obrigatório' 
+            });
         }
 
         if (method === 'code' && !phoneNumber) {
-            return res.status(400).json({ error: 'Número de telefone é obrigatório para código' });
+            return res.status(400).json({ 
+                error: 'VALIDACAO',
+                message: 'Número de telefone é obrigatório para pairing code' 
+            });
         }
 
         try {
-            console.log(`\n${'🔥'.repeat(35)}`);
-            console.log(`[API] Nova conexão`);
-            console.log(`[API] User: ${userId}`);
-            console.log(`[API] Método: ${method}`);
-            console.log(`[API] Tel: ${phoneNumber || 'N/A'}`);
-            console.log(`${'🔥'.repeat(35)}\n`);
-            
             const result = await MultiSessionBot.startSession(userId, method, phoneNumber);
-            
-            console.log(`[API] ✅ Sucesso:`, result.type);
+            console.log(`[API] ✅ Resultado enviado ao cliente:`, result.type);
             return res.json(result);
             
         } catch (error) {
-            console.error('[API] ❌ Erro:', error.message);
+            console.error('[API] ❌ Erro no fluxo de conexão:', error.message);
             
-            // Erro 515 - Outro dispositivo
-            if (error.message.includes('ERRO_515')) {
+            if (error.message.includes('CONEXAO_JA_EM_ANDAMENTO')) {
                 return res.status(409).json({ 
-                    error: 'CONFLITO_DISPOSITIVO',
-                    message: 'Outro WhatsApp está conectado neste número. Desconecte todos os dispositivos e tente novamente.',
-                    solution: 'Abra WhatsApp → Dispositivos Conectados → Desconecte todos'
+                    error: 'DUPLICACAO',
+                    message: 'Uma conexão já está sendo processada. Aguarde.' 
                 });
             }
-            
-            // Timeout
-            if (error.message.includes('TIMEOUT')) {
-                return res.status(408).json({ 
-                    error: 'TIMEOUT',
-                    message: 'Tempo esgotado. Tente novamente.'
-                });
-            }
-            
-            // Logout/Sessão inválida
-            if (error.message.includes('LOGOUT')) {
-                return res.status(401).json({ 
-                    error: 'SESSAO_INVALIDA',
-                    message: 'Sessão inválida. Gere um novo código/QR.'
-                });
-            }
-            
-            // Erro genérico
+
             return res.status(500).json({ 
                 error: 'FALHA_CONEXAO',
-                message: error.message || 'Falha ao conectar'
+                message: error.message || 'Erro interno ao tentar conectar.' 
             });
         }
     },
 
     /**
-     * 🔌 DESCONECTAR
+     * 🔌 DESCONECTAR USUÁRIO
      */
     async disconnect(req, res) {
         const { userId } = req.body;
         
         if (!userId) {
-            return res.status(400).json({ error: 'userId é obrigatório' });
+            return res.status(400).json({ error: 'VALIDACAO', message: 'userId é obrigatório' });
         }
 
         try {
+            console.log(`[API] 🔌 Solicitando desconexão para: ${userId}`);
             const success = await MultiSessionBot.disconnectSession(userId);
+            
             return res.json({ 
                 success, 
-                message: success ? 'Desconectado com sucesso' : 'Nenhuma sessão ativa encontrada' 
+                message: success ? 'Sessão encerrada e limpa.' : 'Nenhuma sessão ativa encontrada.' 
             });
         } catch (error) {
-            console.error('[API] Erro ao desconectar:', error);
-            return res.status(500).json({ 
-                error: 'Erro ao desconectar',
-                message: error.message 
-            });
+            console.error('[API] ❌ Erro ao desconectar:', error);
+            return res.status(500).json({ error: 'ERRO_DESCONEXAO', message: error.message });
         }
     },
 
     /**
-     * 📊 VERIFICAR STATUS
+     * 📊 STATUS DA SESSÃO
      */
     async getStatus(req, res) {
         const { userId } = req.params;
         
         if (!userId) {
-            return res.status(400).json({ error: 'userId é obrigatório' });
+            return res.status(400).json({ error: 'VALIDACAO', message: 'userId é obrigatório' });
         }
 
         try {
             const status = MultiSessionBot.getStatus(userId);
             return res.json(status);
         } catch (error) {
-            console.error('[API] Erro ao verificar status:', error);
             return res.status(500).json({ 
                 connected: false, 
                 state: 'error',
-                number: null,
-                error: error.message
+                message: error.message
             });
         }
     },
 
     /**
-     * 🧹 LIMPEZA FORÇADA (Emergência)
+     * 🧹 LIMPEZA FORÇADA (O QUE RESOLVE O ERRO TYPEERROR)
      */
     async forceCleanup(req, res) {
         try {
-            console.log('\n🗑️ LIMPEZA FORÇADA INICIADA...\n');
+            console.log('\n' + '═'.repeat(40));
+            console.log('🗑️  EXECUTANDO LIMPEZA TOTAL DO SISTEMA');
+            console.log('═'.repeat(40));
             
-            const cleaned = MultiSessionBot.forceCleanAllSessions();
+            // Chama a função que acabamos de criar no MultiSessionBot.js
+            const cleanedCount = await MultiSessionBot.forceCleanAllSessions();
             
-            // Aguarda para garantir que arquivos foram liberados
+            // Aguarda 3 segundos para o sistema de arquivos liberar as travas
             await new Promise(resolve => setTimeout(resolve, 3000));
-            
-            console.log('✅ LIMPEZA COMPLETA!\n');
             
             return res.json({
                 success: true,
-                message: 'Sistema limpo completamente',
-                sessionsRemoved: cleaned,
-                nextStep: 'Aguarde 2 minutos antes de conectar novamente',
+                message: 'Limpeza global concluída com sucesso.',
+                sessionsRemoved: cleanedCount,
                 timestamp: new Date().toISOString()
             });
             
         } catch (error) {
-            console.error('❌ Erro na limpeza:', error);
+            console.error('❌ Erro fatal na limpeza forçada:', error);
             return res.status(500).json({ 
                 success: false,
-                error: 'Erro ao limpar',
+                error: 'ERRO_LIMPEZA',
                 message: error.message 
             });
         }
