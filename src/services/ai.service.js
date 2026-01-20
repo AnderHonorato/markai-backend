@@ -592,16 +592,17 @@ async function conversarComIA(mensagem, profissionalNome, servicos, historico) {
 
 PERSONALIDADE:
 - Seja simpática, mas descontraida, profissional e objetiva
-- Evite respostas longas
-- Máximo 3 paragrafos de texto de 3 linhas por resposta
-- Use emojis com moderação (1 ou por mensagem)
+- Respostas curtas e diretas (máximo 300 caracteres)
+- Máximo 3 parágrafos curtos por resposta
+- Use emojis com moderação (1-2 por mensagem)
 - Seja profissional mas amigável
 
 REGRAS CRÍTICAS:
 1. Fale APENAS sobre: serviços, horários e agendamentos com ${profissionalNome}
-2. Se perguntarem sobre agendamento: " Digite *'agendar'* para começar!"
+2. Se perguntarem sobre agendamento: "Digite *'agendar'* para começar!"
 3. NÃO converse sobre outros assuntos (fale que não é o foco da Markaí)
 4. NUNCA mencione que vai finalizar a conversa - isso é automático
+5. SEMPRE complete suas frases - NUNCA termine no meio de uma palavra
 
 
 SERVIÇOS DISPONÍVEIS:
@@ -618,7 +619,7 @@ Markaí: "Temos vários serviços! 💰\n${listaServicos}\n\nQuer agendar? Digit
 Cliente: "Como está o tempo?"
 Markaí: "Sou IA de agendamentos, não de meteorologia! 😅 Posso ajudar com horários e serviços. Digite *'agendar'* para marcar!"
 
-NUNCA repita a mesma mensagem. Varie as respostas.`;
+IMPORTANTE: Seja BREVE mas COMPLETA. Termine suas frases de forma natural.`;
 
         let contexto = '';
         historico.slice(-3).forEach(h => {
@@ -633,9 +634,8 @@ NUNCA repita a mesma mensagem. Varie as respostas.`;
         
         let resposta = response.data?.response?.trim() || 'Desculpe, não entendi.';
         
-        if (resposta.length > 200) {
-            resposta = resposta.substring(0, 197) + '...';
-        }
+        // ✅ REMOVIDO O LIMITE DE 200 CARACTERES
+        // A IA agora pode responder completamente, mas o prompt pede respostas curtas
         
         return resposta;
         
@@ -685,15 +685,37 @@ async function finalizarAgendamento(estado, telefoneCliente, professionalId, cli
         console.log('[IA] ✅ Cliente criado! ID:', cliente.id);
     }
     
-    const dataAgendamento = new Date(estado.diaEscolhido);
-    const [hora, minuto] = estado.horaEscolhida.split(':');
-    dataAgendamento.setHours(parseInt(hora), parseInt(minuto), 0, 0);
+    // ============================================
+    // 🔧 CORREÇÃO DO FUSO HORÁRIO (PROBLEMA PRINCIPAL)
+    // ============================================
     
+    // Pega a data escolhida (ex: 20/01/2026)
+    const dataAgendamento = new Date(estado.diaEscolhido);
+    
+    // Extrai hora e minuto do horário escolhido (ex: "14:30")
+    const [hora, minuto] = estado.horaEscolhida.split(':');
+    
+    // ✅ ANTES: setHours() convertia para UTC automaticamente
+    // dataAgendamento.setHours(parseInt(hora), parseInt(minuto), 0, 0);
+    
+    // ✅ AGORA: Usamos strings para manter o horário local de Brasília
+    const ano = dataAgendamento.getFullYear();
+    const mes = String(dataAgendamento.getMonth() + 1).padStart(2, '0');
+    const dia = String(dataAgendamento.getDate()).padStart(2, '0');
+    
+    // Monta string ISO no formato: "2026-01-20T14:30:00-03:00"
+    // O "-03:00" indica fuso horário de Brasília
+    const dataHoraLocal = `${ano}-${mes}-${dia}T${String(hora).padStart(2, '0')}:${String(minuto).padStart(2, '0')}:00-03:00`;
+    
+    console.log('[IA] 🕐 Data/Hora escolhida pelo cliente:', estado.horaEscolhida);
+    console.log('[IA] 📅 Data ISO gerada:', dataHoraLocal);
+    
+    // Cria o agendamento com a data corrigida
     const appointment = await prisma.appointment.create({
         data: {
             clientId: cliente.id,
             proId: professionalId,
-            date: dataAgendamento,
+            date: new Date(dataHoraLocal), // ✅ AGORA RESPEITA O FUSO DE BRASÍLIA
             status: 'PENDING',
             serviceList: estado.servicoEscolhido?.name || 'Consulta',
             totalPrice: estado.servicoEscolhido?.price || 0,
@@ -703,6 +725,7 @@ async function finalizarAgendamento(estado, telefoneCliente, professionalId, cli
     });
     
     console.log('[IA] 📅 Agendamento criado! ID:', appointment.id);
+    console.log('[IA] 🕐 Data salva no banco:', appointment.date);
     
     iniciarVerificacaoConfirmacao(appointment.id, cliente.phone, professionalId);
     
