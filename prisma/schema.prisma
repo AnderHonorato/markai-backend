@@ -76,6 +76,7 @@ model User {
   workStart            String?    @default("08:00")  
   workDays             String?  @default("1,2,3,4,5") // 0=Sun, 6=Sat  
   workEnd              String?    @default("17:00")     
+  
 
   // Financeiro
   autoOpenRegister     Boolean   @default(false)
