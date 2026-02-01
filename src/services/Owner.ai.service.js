@@ -1,5 +1,5 @@
 // backend/src/services/Owner.ai.service.js
-// ✅ VERSÃO FINAL - COM DOWNLOADS + IA + RETRY DE ENVIO
+// ✅ VERSÃO FINAL - COM DOWNLOADS + IA + RETRY DE ENVIO + SOCKET ATUAL
 
 const axios = require('axios');
 const { PrismaClient } = require('@prisma/client');
@@ -291,8 +291,8 @@ function processOwnerMessage(phoneNumber) {
     activateHumanMode(phoneNumber);
 }
 
-// ✅ FUNÇÃO DE RETRY PARA ENVIO DE MENSAGENS
-async function enviarComRetry(funcaoEnvio, maxTentativas = 3) {
+// ✅ FUNÇÃO DE RETRY PARA ENVIO DE MENSAGENS (MAIS AGRESSIVO)
+async function enviarComRetry(funcaoEnvio, maxTentativas = 5) {
     let ultimoErro = null;
     
     for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
@@ -307,7 +307,7 @@ async function enviarComRetry(funcaoEnvio, maxTentativas = 3) {
             
             // Se não for a última tentativa, aguarda antes de tentar novamente
             if (tentativa < maxTentativas) {
-                const delay = 1000 * tentativa; // 1s, 2s, 3s
+                const delay = 2000 * tentativa; // 2s, 4s, 6s, 8s, 10s
                 console.log(`[OWNER AI RETRY] ⏳ Aguardando ${delay}ms antes da próxima tentativa...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
@@ -320,12 +320,12 @@ async function enviarComRetry(funcaoEnvio, maxTentativas = 3) {
 }
 
 /**
- * ✅ PROCESSA MENSAGEM COM DEBOUNCE + DOWNLOADS
+ * ✅ PROCESSA MENSAGEM COM DEBOUNCE + DOWNLOADS + SOCKET ATUAL
  */
 async function processarMensagemComDebounce(
     message, 
     phoneNumber, 
-    ownerSock, 
+    ownerSock, // ✅ IGNORADO - não será usado
     enviarDigitando, 
     enviarResposta, 
     isGroup = false, 
@@ -336,20 +336,32 @@ async function processarMensagemComDebounce(
     const clientId = phoneNumber || 'unknown';
     const msgLower = message.toLowerCase().trim();
     
+    // ✅ FUNÇÃO PARA PEGAR SOCKET ATUAL
+    const OwnerBot = require('./OwnerBot');
+    const getSock = () => OwnerBot.getSocket();
+    
     // ✅ PRIORIDADE 1: DETECTA REQUISIÇÕES DE MÍDIA **ANTES DE TUDO**
     const mediaRequest = detectMediaRequest(message);
     
     if (mediaRequest) {
         console.log('[OWNER AI] 🎯 Requisição de mídia detectada:', mediaRequest.type);
         
-        // ✅ PROCESSA DOWNLOADS IMEDIATAMENTE (SEM DEBOUNCE)
         try {
+            const currentSock = getSock();
+            if (!currentSock) {
+                console.error('[OWNER AI] ❌ Socket não disponível para mídia');
+                if (enviarResposta) {
+                    await enviarResposta('❌ Bot temporariamente indisponível. Tente novamente.', messageKey);
+                }
+                return;
+            }
+            
             if (mediaRequest.type === 'instagram') {
                 if (enviarResposta) await enviarResposta('📸 Baixando do Instagram...', messageKey);
                 const result = await downloadInstagram(mediaRequest.url);
                 
-                if (result.success && enviarResposta) {
-                    await ownerSock.sendMessage(clientId, {
+                if (result.success) {
+                    await currentSock.sendMessage(clientId, {
                         video: { url: result.videoUrl },
                         caption: `✅ *Download concluído!*\n\n${result.title}`
                     });
@@ -363,8 +375,8 @@ async function processarMensagemComDebounce(
                 if (enviarResposta) await enviarResposta('🎵 Baixando do TikTok...', messageKey);
                 const result = await downloadTikTok(mediaRequest.url);
                 
-                if (result.success && enviarResposta) {
-                    await ownerSock.sendMessage(clientId, {
+                if (result.success) {
+                    await currentSock.sendMessage(clientId, {
                         video: { url: result.videoUrl },
                         caption: '✅ *Download do TikTok concluído!*'
                     });
@@ -378,10 +390,12 @@ async function processarMensagemComDebounce(
                 if (enviarResposta) await enviarResposta('🎬 Baixando vídeo do YouTube...\n\n⏳ Pode demorar alguns minutos.', messageKey);
                 const result = await downloadYouTubeVideo(mediaRequest.url);
                 
-                if (result.success && enviarResposta) {
-                    await enviarResposta(`✅ *${result.title}*\n\n📺 Canal: ${result.channel?.name || 'N/A'}\n\n📥 Enviando vídeo...`, messageKey);
+                if (result.success) {
+                    if (enviarResposta) {
+                        await enviarResposta(`✅ *${result.title}*\n\n📺 Canal: ${result.channel?.name || 'N/A'}\n\n📥 Enviando vídeo...`, messageKey);
+                    }
                     
-                    await ownerSock.sendMessage(clientId, {
+                    await currentSock.sendMessage(clientId, {
                         video: { url: result.videoUrl },
                         caption: `📹 ${result.title}`
                     });
@@ -395,10 +409,12 @@ async function processarMensagemComDebounce(
                 if (enviarResposta) await enviarResposta('🎵 Procurando música...', messageKey);
                 const result = await downloadAudio(mediaRequest.search);
                 
-                if (result.success && enviarResposta) {
-                    await enviarResposta(`✅ *${result.title}*\n\n👤 Canal: ${result.channel}\n⏱️ Duração: ${Math.floor(result.duration / 60)}:${(result.duration % 60).toString().padStart(2, '0')}\n\n📥 Baixando áudio...`, messageKey);
+                if (result.success) {
+                    if (enviarResposta) {
+                        await enviarResposta(`✅ *${result.title}*\n\n👤 Canal: ${result.channel}\n⏱️ Duração: ${Math.floor(result.duration / 60)}:${(result.duration % 60).toString().padStart(2, '0')}\n\n📥 Baixando áudio...`, messageKey);
+                    }
                     
-                    await ownerSock.sendMessage(clientId, {
+                    await currentSock.sendMessage(clientId, {
                         audio: { url: result.audioUrl },
                         mimetype: 'audio/mp4'
                     });
@@ -412,8 +428,8 @@ async function processarMensagemComDebounce(
                 if (enviarResposta) await enviarResposta('🎨 Gerando imagem com IA...', messageKey);
                 const result = await generateImage(mediaRequest.prompt);
                 
-                if (result.success && enviarResposta) {
-                    await ownerSock.sendMessage(clientId, {
+                if (result.success) {
+                    await currentSock.sendMessage(clientId, {
                         image: { url: result.imageUrl },
                         caption: `🖼️ *Imagem gerada!*\n\n📝 Prompt: ${mediaRequest.prompt}`
                     });
@@ -427,8 +443,8 @@ async function processarMensagemComDebounce(
                 if (enviarResposta) await enviarResposta('📝 Gerando figurinha animada...', messageKey);
                 const result = await generateAttpSticker(mediaRequest.text);
                 
-                if (result.success && enviarResposta) {
-                    await ownerSock.sendMessage(clientId, {
+                if (result.success) {
+                    await currentSock.sendMessage(clientId, {
                         sticker: result.stickerBuffer
                     });
                 } else if (enviarResposta) {
@@ -573,15 +589,16 @@ async function processarMensagemComDebounce(
         const ultimaMensagemKey = mensagensAgrupadas[mensagensAgrupadas.length - 1].key;
         const mensagemCompleta = mensagensAgrupadas.map(m => m.text).join(' ');
         
-        const resposta = await processClientMessage(mensagemCompleta, clientId, ownerSock);
+        // ✅ NÃO PASSA SOCKET AQUI
+        const resposta = await processClientMessage(mensagemCompleta, clientId, null);
         
         if (resposta && enviarResposta) {
             console.log(`[OWNER AI DEBOUNCE] ✅ Resposta gerada: "${resposta.substring(0, 100)}..."`);
             
-            // ✅ PRIMEIRO: ENVIA A RESPOSTA COM RETRY
+            // ✅ PRIMEIRO: ENVIA A RESPOSTA COM RETRY (5 tentativas)
             const enviado = await enviarComRetry(async () => {
                 await enviarResposta(resposta, ultimaMensagemKey);
-            }, 3);
+            }, 5);
             
             if (enviado) {
                 console.log(`[OWNER AI DEBOUNCE] 📤 Resposta enviada com sucesso!`);
@@ -591,9 +608,12 @@ async function processarMensagemComDebounce(
             
             // ✅ DEPOIS: TENTA PARAR O DIGITANDO (se falhar, não importa)
             try {
-                const remoteJid = isGroup ? clientId : `${clientId}@s.whatsapp.net`;
-                await ownerSock.sendPresenceUpdate('available', remoteJid);
-                console.log('[OWNER AI DEBOUNCE] ⌨️ Status "digitando..." parado');
+                const currentSock = getSock();
+                if (currentSock) {
+                    const remoteJid = isGroup ? clientId : `${clientId}@s.whatsapp.net`;
+                    await currentSock.sendPresenceUpdate('available', remoteJid);
+                    console.log('[OWNER AI DEBOUNCE] ⌨️ Status "digitando..." parado');
+                }
             } catch (presenceError) {
                 console.log('[OWNER AI DEBOUNCE] ⚠️ Erro ao parar digitando (ignorado):', presenceError.message);
             }
@@ -624,9 +644,13 @@ async function processClientMessage(message, phoneNumber, ownerSock) {
         blockUser(clientId);
         
         try {
+            // ✅ PEGA SOCKET ATUAL
+            const OwnerBot = require('./OwnerBot');
+            const currentSock = OwnerBot.getSocket();
             const ownerPhone = process.env.OWNER_PHONE || '';
-            if (ownerPhone) {
-                await ownerSock.sendMessage(ownerPhone, {
+            
+            if (currentSock && ownerPhone) {
+                await currentSock.sendMessage(ownerPhone, {
                     text: `🔔 *NOVO ATENDIMENTO SOLICITADO*\n\n📱 Cliente: ${clientId}\n💬 Mensagem: "${message}"\n\n⚠️ Cliente aguardando resposta humana.`
                 });
             }
