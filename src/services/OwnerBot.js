@@ -1,5 +1,5 @@
 // backend/src/services/OwnerBot.js
-// ✅ VERSÃO COMPLETA - PROCESSA MENSAGENS DO BOT + SCHEDULER AUTOMÁTICO
+// ✅ VERSÃO CORRIGIDA - RECONEXÃO ROBUSTA COMO O MULTISESSIONBOT
 
 const makeWASocket = require('@whiskeysockets/baileys').default;
 const { 
@@ -16,7 +16,7 @@ const { Boom } = require('@hapi/boom');
 const { PrismaClient } = require('@prisma/client');
 const ownerSessionPersistence = require('./OwnerSessionPersistence.service');
 const { loadSavedStates } = require('./Owner.ai.service');
-const autoMessageScheduler = require('./OwnerGroupScheduler.service'); // ✅ IMPORTA SCHEDULER
+const autoMessageScheduler = require('./OwnerGroupScheduler.service');
 
 const prisma = new PrismaClient();
 
@@ -27,7 +27,7 @@ class OwnerBot {
         this.ownerSocket = null;
         this.ownerState = null;
         this.authDir = ownerSessionPersistence.getSessionPath();
-        this.reconnectAttempts = 0;
+        this.reconnectAttempts = 0; // ✅ CONTADOR DE TENTATIVAS
         this.isConnecting = false;
         this.connectionClosed = false;
         this.isRestoring = false;
@@ -235,9 +235,12 @@ class OwnerBot {
                         });
                         
                         await this.updateLastActivity();
-                        this.reconnectAttempts = 0;
                         
-                        // ✅ INICIA O SCHEDULER DE MENSAGENS AUTOMÁTICAS
+                        // ✅ CRÍTICO: RESETA O CONTADOR QUANDO CONECTA COM SUCESSO
+                        this.reconnectAttempts = 0;
+                        console.log('[OwnerBot] ✅ Contador de reconexão resetado');
+                        
+                        // Inicia scheduler
                         console.log('[OwnerBot] 📨 Registrando socket no scheduler...');
                         autoMessageScheduler.setSocket(sock);
                         await autoMessageScheduler.startAll();
@@ -256,17 +259,36 @@ class OwnerBot {
                         
                         console.log(`[OwnerBot] ❌ Conexão fechada: ${statusCode}`);
                         
-                        // ✅ PARA O SCHEDULER
+                        // Para o scheduler
                         autoMessageScheduler.stopAll();
 
                         const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 401;
 
+                        // ✅ SISTEMA DE RECONEXÃO ROBUSTO (IGUAL AO MULTISESSIONBOT)
                         if (shouldReconnect && this.reconnectAttempts < 5) {
                             this.reconnectAttempts++;
-                            const delay = Math.min(10000 * this.reconnectAttempts, 60000);
-                            console.log(`[OwnerBot] 🔄 Tentando reconectar em ${delay/1000}s...`);
-                            setTimeout(() => this.startSession(method, phoneNumber, true), delay);
+                            const delay = Math.min(10000 * this.reconnectAttempts, 60000); // 10s → 20s → 30s → 40s → 60s
+                            
+                            console.log(`[OwnerBot] 🔄 Tentativa de reconexão ${this.reconnectAttempts}/5 em ${delay/1000}s...`);
+                            
+                            setTimeout(() => {
+                                this.startSession(method, phoneNumber, true);
+                            }, delay);
+                            
+                        } else if (this.reconnectAttempts >= 5) {
+                            // ✅ MÁXIMO DE TENTATIVAS ATINGIDO
+                            console.log('[OwnerBot] ⚠️ Máximo de tentativas (5) atingido, parando reconexões');
+                            await this.forceCleanup();
+                            
                         } else if (!shouldReconnect) {
+                            // ✅ ERRO CRÍTICO (401, logout, etc)
+                            console.log('[OwnerBot] 🚪 Logout permanente ou erro crítico detectado');
+                            
+                            // Se for erro de chaves (428/440), limpa tudo
+                            if (statusCode === 428 || statusCode === 440) {
+                                console.log('[OwnerBot] ⚠️ Erro de descriptografia detectado, limpando sessão...');
+                            }
+                            
                             await this.forceCleanup();
                         }
 
@@ -277,7 +299,7 @@ class OwnerBot {
                     }
                 });
 
-                // ✅ PROCESSA TODAS AS MENSAGENS (INCLUINDO DO BOT)
+                // Processa todas as mensagens (incluindo do bot)
                 sock.ev.on('messages.upsert', async ({ messages, type }) => {
                     if (type === 'notify') {
                         if (await this.isPaused()) return;
@@ -334,7 +356,7 @@ class OwnerBot {
         console.log('[OwnerBot] 🧹 Limpando tudo...');
         this.connectionClosed = true;
         
-        // ✅ PARA O SCHEDULER
+        // Para o scheduler
         autoMessageScheduler.stopAll();
         
         if (this.ownerSocket) {
@@ -343,6 +365,8 @@ class OwnerBot {
         
         this.ownerSocket = null;
         this.ownerState = null;
+        
+        // ✅ RESETA CONTADOR DE RECONEXÃO
         this.reconnectAttempts = 0;
 
         await ownerSessionPersistence.clearSession();
@@ -366,7 +390,8 @@ class OwnerBot {
             ...(this.ownerState || { state: 'disconnected' }),
             connected: this.ownerState?.state === 'active',
             paused: ownerData?.ownerBotPaused || false,
-            respondGroups: ownerData?.ownerBotRespondGroups || false
+            respondGroups: ownerData?.ownerBotRespondGroups || false,
+            reconnectAttempts: this.reconnectAttempts // ✅ EXPÕE CONTADOR NO STATUS
         };
     }
 
