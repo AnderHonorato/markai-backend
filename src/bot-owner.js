@@ -6,7 +6,7 @@ const { processOwnerMessage, processarMensagemComDebounce } = require('./service
 const spiderXMedia = require('./services/SpiderXMedia.service');
 const botIdentification = require('./services/Botidentification.service');
 const moltbookDiary = require('./services/MoltbookDiary.service');
-const OwnerBot = require('./services/OwnerBot'); // ✅ IMPORTA PARA PEGAR SOCKET ATUAL
+// ✅ REMOVIDO DO TOPO - require movido para dentro das funções para evitar dependência circular
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -729,9 +729,10 @@ async function handleOwnerIncomingMessage(msg, sessionId, sock) {
         
         console.log('[OWNER BOT] 🤖 Enviando para IA...');
         
-        // ✅ CALLBACKS QUE SEMPRE PEGAM SOCKET ATUAL
+        // ✅ CALLBACKS QUE SEMPRE PEGAM SOCKET ATUAL - require DENTRO da função para evitar circular dependency
         const enviarDigitando = async () => {
             try {
+                const OwnerBot = require('./services/OwnerBot'); // ✅ MOVIDO PARA AQUI
                 const currentSock = OwnerBot.getSocket();
                 if (currentSock) {
                     await currentSock.sendPresenceUpdate('composing', remoteJid);
@@ -743,6 +744,7 @@ async function handleOwnerIncomingMessage(msg, sessionId, sock) {
         
         const enviarResposta = async (texto, messageKey = null) => {
             try {
+                const OwnerBot = require('./services/OwnerBot'); // ✅ MOVIDO PARA AQUI
                 const currentSock = OwnerBot.getSocket();
                 if (!currentSock) {
                     throw new Error('Socket não disponível');
