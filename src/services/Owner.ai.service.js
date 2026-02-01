@@ -1,5 +1,5 @@
 // backend/src/services/Owner.ai.service.js
-// ✅ VERSÃO FINAL - COM DOWNLOADS + IA
+// ✅ VERSÃO FINAL - COM DOWNLOADS + IA + RETRY DE ENVIO
 
 const axios = require('axios');
 const { PrismaClient } = require('@prisma/client');
@@ -291,6 +291,34 @@ function processOwnerMessage(phoneNumber) {
     activateHumanMode(phoneNumber);
 }
 
+// ✅ FUNÇÃO DE RETRY PARA ENVIO DE MENSAGENS
+async function enviarComRetry(funcaoEnvio, maxTentativas = 3) {
+    let ultimoErro = null;
+    
+    for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
+        try {
+            console.log(`[OWNER AI RETRY] 📤 Tentativa ${tentativa}/${maxTentativas} de envio`);
+            await funcaoEnvio();
+            console.log(`[OWNER AI RETRY] ✅ Mensagem enviada com sucesso na tentativa ${tentativa}`);
+            return true;
+        } catch (error) {
+            ultimoErro = error;
+            console.error(`[OWNER AI RETRY] ❌ Tentativa ${tentativa} falhou:`, error.message);
+            
+            // Se não for a última tentativa, aguarda antes de tentar novamente
+            if (tentativa < maxTentativas) {
+                const delay = 1000 * tentativa; // 1s, 2s, 3s
+                console.log(`[OWNER AI RETRY] ⏳ Aguardando ${delay}ms antes da próxima tentativa...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+    
+    console.error(`[OWNER AI RETRY] ❌ Todas as ${maxTentativas} tentativas falharam`);
+    console.error(`[OWNER AI RETRY] Último erro:`, ultimoErro?.message);
+    return false;
+}
+
 /**
  * ✅ PROCESSA MENSAGEM COM DEBOUNCE + DOWNLOADS
  */
@@ -303,7 +331,7 @@ async function processarMensagemComDebounce(
     isGroup = false, 
     isMentioned = false,
     messageKey = null,
-    messageObj = null // ✅ NOVO: objeto completo da mensagem
+    messageObj = null
 ) {
     const clientId = phoneNumber || 'unknown';
     const msgLower = message.toLowerCase().trim();
@@ -321,7 +349,6 @@ async function processarMensagemComDebounce(
                 const result = await downloadInstagram(mediaRequest.url);
                 
                 if (result.success && enviarResposta) {
-                    // Envia o vídeo
                     await ownerSock.sendMessage(clientId, {
                         video: { url: result.videoUrl },
                         caption: `✅ *Download concluído!*\n\n${result.title}`
@@ -551,15 +578,25 @@ async function processarMensagemComDebounce(
         if (resposta && enviarResposta) {
             console.log(`[OWNER AI DEBOUNCE] ✅ Resposta gerada: "${resposta.substring(0, 100)}..."`);
             
+            // ✅ PRIMEIRO: ENVIA A RESPOSTA COM RETRY
+            const enviado = await enviarComRetry(async () => {
+                await enviarResposta(resposta, ultimaMensagemKey);
+            }, 3);
+            
+            if (enviado) {
+                console.log(`[OWNER AI DEBOUNCE] 📤 Resposta enviada com sucesso!`);
+            } else {
+                console.error(`[OWNER AI DEBOUNCE] ❌ Falha ao enviar resposta após todas as tentativas`);
+            }
+            
+            // ✅ DEPOIS: TENTA PARAR O DIGITANDO (se falhar, não importa)
             try {
                 const remoteJid = isGroup ? clientId : `${clientId}@s.whatsapp.net`;
                 await ownerSock.sendPresenceUpdate('available', remoteJid);
-            } catch (e) {
-                console.log('[OWNER AI DEBOUNCE] Erro ao parar digitando:', e.message);
+                console.log('[OWNER AI DEBOUNCE] ⌨️ Status "digitando..." parado');
+            } catch (presenceError) {
+                console.log('[OWNER AI DEBOUNCE] ⚠️ Erro ao parar digitando (ignorado):', presenceError.message);
             }
-            
-            await enviarResposta(resposta, ultimaMensagemKey);
-            console.log(`[OWNER AI DEBOUNCE] 📤 Resposta enviada com sucesso!`);
         } else {
             console.log(`[OWNER AI DEBOUNCE] 🔇 Sem resposta para enviar`);
         }
@@ -662,7 +699,6 @@ async function conversarComGPT5Mini(mensagem, historico, clientId, nomeCliente, 
             contexto = contextoTemp;
         }
         
-        // ✅ PROMPT CORRIGIDO - ENSINA A IA A RESPONDER CORRETAMENTE
         const promptSistema = `Você é AlphaBot, criado pelo Ander.
 
 IMPORTANTE: Quando o usuário pedir PLAYLISTS ou LISTAS de músicas, responda com uma lista numerada de músicas! 
