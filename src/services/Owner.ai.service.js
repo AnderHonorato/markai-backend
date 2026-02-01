@@ -336,9 +336,11 @@ async function processarMensagemComDebounce(
     const clientId = phoneNumber || 'unknown';
     const msgLower = message.toLowerCase().trim();
     
-    // ✅ FUNÇÃO PARA PEGAR SOCKET ATUAL
-    const OwnerBot = require('./OwnerBot');
-    const getSock = () => OwnerBot.getSocket();
+    // ✅ CORREÇÃO PRINCIPAL: require DENTRO do getSock para evitar capturar referência quebrada pela circular dependency
+    const getSock = () => {
+        const OwnerBot = require('./OwnerBot');
+        return OwnerBot.getSocket();
+    };
     
     // ✅ PRIORIDADE 1: DETECTA REQUISIÇÕES DE MÍDIA **ANTES DE TUDO**
     const mediaRequest = detectMediaRequest(message);
@@ -608,7 +610,7 @@ async function processarMensagemComDebounce(
             
             // ✅ DEPOIS: TENTA PARAR O DIGITANDO (se falhar, não importa)
             try {
-                const currentSock = getSock();
+                const currentSock = getSock(); // ✅ AGORA RESOLVE CORRETAMENTE
                 if (currentSock) {
                     const remoteJid = isGroup ? clientId : `${clientId}@s.whatsapp.net`;
                     await currentSock.sendPresenceUpdate('available', remoteJid);
@@ -644,7 +646,7 @@ async function processClientMessage(message, phoneNumber, ownerSock) {
         blockUser(clientId);
         
         try {
-            // ✅ PEGA SOCKET ATUAL
+            // ✅ PEGA SOCKET ATUAL - require dentro da função
             const OwnerBot = require('./OwnerBot');
             const currentSock = OwnerBot.getSocket();
             const ownerPhone = process.env.OWNER_PHONE || '';
