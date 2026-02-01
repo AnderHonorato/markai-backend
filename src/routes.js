@@ -10,11 +10,48 @@ const NoteController = require('./controllers/NoteController');
 const AIController = require('./controllers/AIController');
 const WhatsappController = require('./controllers/WhatsappController');
 const BlogController = require('./controllers/BlogController');
+const OwnerWhatsappController = require('./controllers/OwnerWhatsappController');
 
 routes.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.path}`);
   next();
 });
+
+// ========== OWNER WHATSAPP (EXCLUSIVO PARA OWNER) ==========
+routes.post('/owner/whatsapp/connect', OwnerWhatsappController.connect);
+routes.post('/owner/whatsapp/disconnect', OwnerWhatsappController.disconnect);
+routes.get('/owner/whatsapp/status', OwnerWhatsappController.getStatus);
+routes.post('/owner/whatsapp/force-cleanup', OwnerWhatsappController.forceCleanup);
+routes.get('/owner/whatsapp/ai-stats', OwnerWhatsappController.getAIStats);
+routes.post('/owner/whatsapp/toggle-pause', OwnerWhatsappController.togglePause);
+routes.post('/owner/whatsapp/toggle-groups', OwnerWhatsappController.toggleRespondGroups);
+
+// ========== MOLTBOOK DIARY CONTROLS ==========
+routes.get('/owner/moltbook/config', OwnerWhatsappController.getMoltbookConfig);
+routes.post('/owner/moltbook/config', OwnerWhatsappController.updateMoltbookConfig);
+routes.post('/owner/moltbook/force-post', OwnerWhatsappController.forceMoltbookPost);
+routes.get('/owner/moltbook/stats', OwnerWhatsappController.getMoltbookStats);
+
+// ========== MOLTBOOK SETUP (REGISTRO E CLAIM) ==========
+routes.get('/owner/moltbook/status', OwnerWhatsappController.getMoltbookStatus);
+routes.post('/owner/moltbook/register', OwnerWhatsappController.registerMoltbook);
+routes.post('/owner/moltbook/validate-claim', OwnerWhatsappController.validateMoltbookClaim);
+
+// ✅ ROTAS DE GRUPOS DO OWNER (EXISTENTES)
+routes.get('/owner/whatsapp/groups', OwnerWhatsappController.getGroups);
+routes.post('/owner/whatsapp/groups/:groupId/auto-message', OwnerWhatsappController.configureGroupAutoMessage);
+routes.get('/owner/whatsapp/groups/:groupId/config', OwnerWhatsappController.getGroupConfig);
+
+// ✅ NOVAS ROTAS - MÚLTIPLAS MENSAGENS E IA INDIVIDUAL
+routes.post('/owner/whatsapp/groups/:groupId/auto-messages', OwnerWhatsappController.configureGroupAutoMessages);
+routes.post('/owner/whatsapp/groups/:groupId/ai', OwnerWhatsappController.toggleGroupAI);
+routes.get('/owner/whatsapp/groups/:groupId/ai-status', OwnerWhatsappController.getGroupAIStatus);
+
+// ✅ NOVAS ROTAS - GERENCIAMENTO DE LID DO BOT
+routes.put('/owner/whatsapp/groups/:groupId/bot-lid', OwnerWhatsappController.updateBotLID);
+routes.delete('/owner/whatsapp/groups/:groupId/bot-lid', OwnerWhatsappController.resetBotLID);
+routes.get('/owner/whatsapp/groups/bot-lids', OwnerWhatsappController.getAllBotLIDs);
+routes.post('/owner/whatsapp/groups/:groupId/activate', OwnerWhatsappController.activateInGroup);
 
 // ========== WHATSAPP (PRIORIDADE) ==========
 routes.post('/whatsapp/connect', WhatsappController.connect);
@@ -89,6 +126,9 @@ routes.patch('/admin/users/:id/verify', UserController.adminToggleVerify);
 routes.post('/admin/users/:id/ban', UserController.adminBanUser);
 routes.patch('/admin/users/:id/mod', UserController.adminToggleMod);
 routes.delete('/admin/users/:id', UserController.adminDeleteUser);
+
+// ========= KYC ==========
+routes.patch('/admin/verifications/:id', UserController.adminResolveKyc);
 
 // ========== DENÚNCIAS ==========
 routes.post('/reports', UserController.createReport);

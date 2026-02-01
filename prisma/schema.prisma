@@ -28,6 +28,14 @@ model User {
   phone               String?     
   avatarUrl           String?   // Foto do perfil (Base64)
 
+  // 👑 OWNER BOT - CONFIGURAÇÕES PERSISTENTES
+  ownerBotPaused       Boolean   @default(false)  // Bot pausado ou ativo
+  ownerBotConnectedAt  DateTime? // Quando conectou
+  ownerBotLastActivity DateTime? // Última mensagem processada
+  ownerBotRespondGroups Boolean   @default(false)
+  ownerGroupConfigs     Json?     @default("{}")
+  moltbookConfig        Json?     @default("{}")
+
   // ADMINISTRATIVO
   role                String    @default("USER")   // "USER", "MODERATOR", "OWNER"
   banExpiresAt        DateTime? // Se a data for futura, o usuário está banido

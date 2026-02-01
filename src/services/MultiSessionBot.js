@@ -177,10 +177,9 @@ class MultiSessionBot {
                         keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
                     },
                     logger: pino({ level: 'silent' }),
-                    browser: Browsers.ubuntu('Chrome'),
+                    browser: ['Ubuntu', 'Chrome', '20.0.04'],
                     markOnlineOnConnect: true,
                     connectTimeoutMs: 60000,
-                    generateHighQualityLinkPreview: false,
                     syncFullHistory: false,
                 });
 

@@ -1,0 +1,147 @@
+{
+  "conversationStates": {
+    "228552607846420": {
+      "historico": [
+        {
+          "role": "user",
+          "content": "Porque está enviando coisas nada a ver pra mim?"
+        },
+        {
+          "role": "assistant",
+          "content": "Claro! Sou o AlphaBot, criado e treinado pelo Ander. Como posso ajudar hoje? 🎧🤖 Se precisar baixar música, gerar imagem, criar figurinha ou qualquer outra tarefa, é só dizer!"
+        },
+        {
+          "role": "user",
+          "content": "Porque está enviando coisas nada a ver pra mim?"
+        },
+        {
+          "role": "assistant",
+          "content": "Desculpe se algo saiu fora do esperado! Sou o *AlphaBot*, criado pelo Ander, e estou aqui para ajudar. Se algo não bateu com o que você pediu, me diga exatamente o que precisa e eu ajusto imediatamente. 🚀✨"
+        },
+        {
+          "role": "user",
+          "content": "Faça uma playlist da lady gaga"
+        },
+        {
+          "role": "assistant",
+          "content": "🎵 *Playlist da Lady Gaga*\n\n1. Bad Romance  \n2. Poker Face  \n3. Born This Way  \n4. Shallow (feat. Bradley Cooper)  \n5. Just Dance  \n6. Telephone (feat. Beyoncé)  \n7. Paparazzi  \n8. Alejandro  \n9. The Edge of Glory  \n10."
+        },
+        {
+          "role": "user",
+          "content": "Preciso que seja top 10 da lady gaga"
+        },
+        {
+          "role": "assistant",
+          "content": "🎵 *Playlist Top 10 da Lady Gaga*\n\n1. *Bad Romance*  \n2. *Poker Face*  \n3. *Just Dance*  \n4. *Born This Way*  \n5. *The Edge of Glory*  \n6. *Applause*  \n7. *Shallow* (with Bradley Cooper)  \n8. *Rain on Me* (with Ariana Grande)  \n9. *Stupid Love*  \n10. *Rain*  \n\nPara baixar, use: *baixar música [nome]* 🎧✨"
+        },
+        {
+          "role": "user",
+          "content": "Obrigado Até mais Já falo com bc"
+        },
+        {
+          "role": "assistant",
+          "content": "De nada! 🌟 Se precisar de algo mais, é só chamar. Até mais! 🚀"
+        }
+      ],
+      "primeiraInteracao": false,
+      "nomeCliente": null,
+      "jaCumprimentou": true,
+      "conversouAntes": false
+    },
+    "120363420773353345@g.us": {
+      "historico": [
+        {
+          "role": "user",
+          "content": "Porque deu erro"
+        },
+        {
+          "role": "assistant",
+          "content": "Poderia me dizer qual produto você está usando (FaleZap, Markaí ou Bot) e qual mensagem de erro apareceu? Assim consigo entender melhor o que aconteceu e te orientar passo a passo."
+        },
+        {
+          "role": "user",
+          "content": "No bot, a mensagem de erro:\n\n❌ Não consegui gerar a figurinha. Tente um texto mais curto.\n\nDica: Use textos mais curtos (até 30 caracteres)."
+        },
+        {
+          "role": "assistant",
+          "content": "Sou o AlphaBot, assistente do Ander! Como posso ajudar você hoje? 🚀🤖"
+        },
+        {
+          "role": "user",
+          "content": "Criar Gif"
+        },
+        {
+          "role": "assistant",
+          "content": "Entendi! Esse erro acontece quando o texto ultrapassa o limite de 30 caracteres.  \n🔹 *Dica rápida*: use algo como “Oi, tudo bem?” (15 caracteres) ou “Olá!” (4 caracteres).  \n🔹 Se precisar de mais texto, divida em duas figurinhas ou use emojis que ocupam menos espaço.  \n🔹 Certifique‑se de não incluir caracteres especiais ou emojis que aumentem a contagem.  \n\nTente enviar um texto curto e me avise se ainda aparecer o erro."
+        },
+        {
+          "role": "user",
+          "content": "Olá"
+        },
+        {
+          "role": "assistant",
+          "content": "Para criar um GIF no Bot, basta enviar o texto ou a sequência de imagens que deseja transformar.  \n1️⃣ Abra o Bot e escolha “Criar GIF”.  \n2️⃣ Se for texto, limite‑se a 30 caracteres por frame.  \n3️⃣ Se for imagens, envie até 10 arquivos JPG/PNG.  \n4️⃣ Clique em “Gerar” e aguarde o resultado.  \n\nCaso apareça erro, verifique o tamanho do texto ou o número de imagens. Precisa de ajuda com algum passo? 🚀✨"
+        },
+        {
+          "role": "user",
+          "content": "Legal você faz isso sozinho?"
+        },
+        {
+          "role": "assistant",
+          "content": "Entendi! Sou o AlphaBot, pronto para ajudar com moderação de grupos, interações automáticas e muito mais. Precisa de alguma funcionalidade específica ou tem alguma tarefa em mente?"
+        }
+      ],
+      "primeiraInteracao": false,
+      "nomeCliente": null,
+      "jaCumprimentou": true,
+      "conversouAntes": false
+    },
+    "120363263253332098@g.us": {
+      "historico": [],
+      "primeiraInteracao": false,
+      "nomeCliente": null,
+      "jaCumprimentou": false,
+      "conversouAntes": false
+    },
+    "557799512937": {
+      "historico": [
+        {
+          "role": "user",
+          "content": "oi"
+        },
+        {
+          "role": "assistant",
+          "content": "Boa noite! 🌟 Eu sou o AlphaBot, seu assistente pessoal da Ander. Estou aqui para ajudar com tudo que precisar, desde dúvidas sobre nossos produtos até agendamentos. Como posso te ajudar hoje?"
+        },
+        {
+          "role": "user",
+          "content": "baixar video instagram https://www.instagram.com/reel/DT3pWmYjJCC/?utm_source=ig_web_copy_link"
+        },
+        {
+          "role": "assistant",
+          "content": "Desculpe, mas não posso ajudar com isso. 🚫 Se precisar de ajuda com outras dúvidas, estou à disposição!"
+        },
+        {
+          "role": "user",
+          "content": "baixar video instagram https://www.instagram.com/reel/DT3pWmYjJCC/?utm_source=ig_web_copy_link"
+        },
+        {
+          "role": "assistant",
+          "content": "Entendi! Estou pronto para ajudar com qualquer tarefa que você precisar. 🚀 Se quiser baixar músicas, gerar imagens ou criar figurinhas, é só me chamar!"
+        }
+      ],
+      "primeiraInteracao": false,
+      "nomeCliente": null,
+      "jaCumprimentou": true,
+      "conversouAntes": false
+    }
+  },
+  "humanModeActive": {
+    "5511967797232": {
+      "active": true,
+      "lastMessage": 1769916455111
+    }
+  },
+  "blockedUsers": {},
+  "timestamp": "2026-02-01T14:25:06.265Z"
+}

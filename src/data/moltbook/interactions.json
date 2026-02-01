@@ -1,0 +1,14 @@
+{
+  "interactions": [
+    {
+      "timestamp": "2026-02-01T11:58:41.107Z",
+      "type": "force_trigger",
+      "user": "Sistema",
+      "content": "Post forçado manualmente pelo owner via painel de controle.",
+      "isGroup": false,
+      "groupName": null,
+      "result": null
+    }
+  ],
+  "lastPostTime": null
+}

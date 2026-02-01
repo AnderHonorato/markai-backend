@@ -441,6 +441,7 @@ module.exports = {
     } catch (error) { return res.status(500).json({ error: 'Erro ao buscar slug.' }); }
   },
 
+  
   // ===========================================
   // SISTEMA DE DENÚNCIAS E ADMIN
   // ===========================================
@@ -823,28 +824,73 @@ async adminSendGlobalMessage(req, res) {
     }
   },
 
+// --- ADMIN: LISTAR SOLICITAÇÕES DE VERIFICAÇÃO (KYC) ---
   async adminListVerifications(req, res) {
-  const { requesterId } = req.query;
-  try {
-    // Verifica se é admin
-    const requester = await prisma.user.findUnique({ where: { id: requesterId } });
-    if (!requester || (requester.role !== 'MODERATOR' && requester.role !== 'OWNER')) {
-       return res.status(403).json({ error: 'Sem permissão.' });
-    }
+    const { requesterId } = req.query;
+    console.log("🔍 Tentativa de acesso KYC por ID:", requesterId);
 
-    // Busca usuários que enviaram documentos mas ainda não estão verificados
-    // (Ajuste conforme seu Schema, aqui estou assumindo uma tabela VerificationRequest ou usuários com flag pendente)
-    // Se você não tiver tabela de verificação, crie ou adapte essa query:
-    const requests = await prisma.verificationRequest.findMany({
-        where: { status: 'PENDING' },
-        include: { user: true }
-    });
-    
-    return res.json(requests);
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json({ error: 'Erro ao listar verificações' });
-  }
-},
+    try {
+      const admin = await prisma.user.findUnique({ 
+        where: { id: requesterId } 
+      });
+
+      if (admin) {
+        console.log(`👤 Usuário encontrado: ${admin.email} - Role: ${admin.role}`);
+      }
+
+      const isMaster = admin?.email === 'contato.markaiapp@gmail.com';
+      const hasRole = admin?.role === 'OWNER' || admin?.role === 'MODERATOR';
+
+      if (!admin || (!hasRole && !isMaster)) {
+        return res.status(403).json({ error: "Sem permissão." });
+      }
+
+      // 3. Busca apenas os pedidos que ainda estão PENDENTES
+      const requests = await prisma.verificationRequest.findMany({
+        where: {
+          status: 'PENDING' // ✅ Isso faz com que aprovados sumam da lista ao recarregar
+        },
+        include: { 
+          user: {
+            select: { name: true, email: true, avatarUrl: true, type: true }
+          }
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      return res.json(requests);
+    } catch (error) {
+      console.error("💥 Erro interno adminListVerifications:", error);
+      return res.status(500).json({ error: "Erro interno no servidor." });
+    }
+  },
+
+// --- ADMIN: RESOLVER KYC ---
+  async adminResolveKyc(req, res) {
+    const { id } = req.params;
+    const { status, reason, requesterId } = req.body;
+
+    try {
+      const admin = await prisma.user.findUnique({ where: { id: requesterId } });
+      if (!admin || (admin.role !== 'OWNER' && admin.role !== 'MODERATOR' && admin.email !== 'contato.markaiapp@gmail.com')) {
+        return res.status(403).json({ error: "Sem permissão." });
+      }
+
+      const kyc = await prisma.verificationRequest.update({
+        where: { id: id },
+        data: { status, reason, resolvedAt: new Date() }
+      });
+
+      if (status === 'APPROVED') {
+        await prisma.user.update({
+          where: { id: kyc.userId },
+          data: { isVerified: true }
+        });
+      }
+      return res.json({ success: true });
+    } catch (error) {
+      return res.status(500).json({ error: "Erro ao processar." });
+    }
+  },
  
 };        

@@ -4,6 +4,7 @@ const cors = require('cors');
 const routes = require('./routes');
 const MultiSessionBot = require('./services/MultiSessionBot');
 const SessionPersistence = require('./services/SessionPersistence');
+const OwnerBot = require('./services/OwnerBot'); // ✅ IMPORTA OWNERBOT
 
 const app = express();
 
@@ -216,23 +217,23 @@ app.listen(PORT, async () => {
     console.log('✅ Rotas carregadas com sucesso');
     
     // ====================================
-    // 🔄 RESTAURAÇÃO AUTOMÁTICA DE SESSÕES
+    // 🔄 RESTAURAÇÃO AUTOMÁTICA DE SESSÕES DOS CLIENTES
     // ====================================
     
     console.log('\n' + '═'.repeat(60));
-    console.log('🔄 INICIANDO RESTAURAÇÃO AUTOMÁTICA DE SESSÕES');
+    console.log('🔄 INICIANDO RESTAURAÇÃO AUTOMÁTICA DE SESSÕES DOS CLIENTES');
     console.log('═'.repeat(60));
     
     try {
         const restoreResult = await MultiSessionBot.restoreAllSessions();
         
         if (restoreResult.restored > 0) {
-            console.log('\n✅ SESSÕES RESTAURADAS COM SUCESSO!');
+            console.log('\n✅ SESSÕES DE CLIENTES RESTAURADAS COM SUCESSO!');
             console.log(`   Total processadas: ${restoreResult.total}`);
             console.log(`   Restauradas: ${restoreResult.restored}`);
             console.log(`   Falhas: ${restoreResult.failed}`);
         } else if (restoreResult.total === 0) {
-            console.log('\n📂 Nenhuma sessão anterior para restaurar');
+            console.log('\n📂 Nenhuma sessão de cliente anterior para restaurar');
         } else {
             console.log('\n⚠️ Algumas sessões falharam ao restaurar');
             console.log(`   Restauradas: ${restoreResult.restored}`);
@@ -240,10 +241,37 @@ app.listen(PORT, async () => {
         }
         
     } catch (error) {
-        console.error('\n❌ ERRO NA RESTAURAÇÃO:', error.message);
+        console.error('\n❌ ERRO NA RESTAURAÇÃO DE CLIENTES:', error.message);
     }
     
     console.log('═'.repeat(60));
+    console.log();
+    
+    // ====================================
+    // 👑 RESTAURAÇÃO AUTOMÁTICA DO OWNER BOT
+    // ====================================
+    
+    console.log('\n' + '👑'.repeat(60));
+    console.log('🔄 VERIFICANDO SESSÃO DO OWNER BOT');
+    console.log('👑'.repeat(60));
+    
+    try {
+        const ownerRestored = await OwnerBot.restoreSession();
+        
+        if (ownerRestored) {
+            console.log('\n✅ SESSÃO DO OWNER RESTAURADA COM SUCESSO!');
+            console.log('   Owner Bot está ativo e pronto para receber mensagens');
+        } else {
+            console.log('\n📂 Nenhuma sessão do Owner para restaurar');
+            console.log('   Owner Bot aguardando conexão manual');
+        }
+        
+    } catch (error) {
+        console.error('\n❌ ERRO NA RESTAURAÇÃO DO OWNER:', error.message);
+        console.log('   Owner Bot aguardando conexão manual');
+    }
+    
+    console.log('👑'.repeat(60));
     console.log();
     
     // ====================================
@@ -265,9 +293,11 @@ app.listen(PORT, async () => {
     }
     
     console.log();
-    console.log('📱 WhatsApp Bot: Sessões restauradas automaticamente');
+    console.log('📱 WhatsApp Bot Clientes: Sessões restauradas automaticamente');
+    console.log('👑 WhatsApp Bot Owner: Sessão restaurada automaticamente (se disponível)');
     console.log('💡 Sessões permanecem conectadas até desconexão manual');
-    console.log('🔗 API: POST /api/whatsapp/connect');
+    console.log('🔗 API Clientes: POST /api/whatsapp/connect');
+    console.log('🔗 API Owner: POST /owner/whatsapp/connect');
     console.log('📊 Health Check: GET /health');
     console.log('📈 Estatísticas: GET /stats');
     console.log();
@@ -286,24 +316,37 @@ async function gracefulShutdown(signal) {
     
     console.log('🔌 Fechando conexões ativas...');
     
-    // Atualiza status de todas as sessões antes de desconectar
+    // ✅ SALVA SESSÕES DOS CLIENTES
     if (MultiSessionBot.sessions) {
-        console.log('📱 Salvando estado das sessões WhatsApp...');
+        console.log('📱 Salvando estado das sessões WhatsApp dos clientes...');
         
         const sessions = Array.from(MultiSessionBot.sessions.keys());
         
         for (const userId of sessions) {
             try {
-                // Atualiza status para 'shutdown'
                 SessionPersistence.updateSessionStatus(userId, 'shutdown');
-                
-                // NÃO desconecta - apenas salva o estado
-                // As credenciais já estão salvas e serão restauradas no próximo boot
-                console.log(`💾 Estado salvo: ${userId}`);
-                
+                console.log(`💾 Estado salvo (cliente): ${userId}`);
             } catch (error) {
                 console.error(`❌ Erro ao salvar ${userId}:`, error.message);
             }
+        }
+    }
+    
+    // ✅ SALVA SESSÃO DO OWNER (se estiver conectado)
+    const ownerSessionPersistence = require('./services/OwnerSessionPersistence.service');
+    const ownerMetadata = ownerSessionPersistence.loadMetadata();
+    
+    if (ownerMetadata && ownerMetadata.connected) {
+        console.log('👑 Salvando estado da sessão do Owner...');
+        
+        try {
+            await ownerSessionPersistence.saveMetadata({
+                ...ownerMetadata,
+                lastActivity: new Date().toISOString()
+            });
+            console.log('💾 Estado salvo (Owner)');
+        } catch (error) {
+            console.error('❌ Erro ao salvar Owner:', error.message);
         }
     }
     
